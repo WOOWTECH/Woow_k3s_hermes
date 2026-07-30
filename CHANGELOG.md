@@ -2,6 +2,36 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [0.16.3] - 2026-07-30
+
+### Added
+- `tests/video-e2e-happy.sh` — full happy-path E2E test for the slide-to-video
+  pipeline. Generates a 3-slide HTML + narration script inline, then walks the
+  entire pipeline: edge-tts → Playwright WebM capture → ffmpeg segment build
+  (audio-aligned) → concat demuxer → srt+pysubs2 subtitle round-trip →
+  ffmpeg subtitle burn → ffprobe quality gates (h264+aac codec, resolution,
+  size, duration). Verified 6/6 stages Pass on live cluster; produces a
+  539.5 KB / 15.38s / 1280×720 MP4 in ~60-90s.
+- `tests/video-e2e-edges.sh` — 10-case adversarial edge battery:
+    1. edge-tts empty text (lenient behavior)
+    2. 60s+ TTS (memory/latency)
+    3. Special chars (emoji + CJK + URL + quotes)
+    4. Playwright micro-capture (0.3s)
+    5. Playwright 1920×1080 scroll-through
+    6. ffmpeg concat with mismatched resolutions (auto-scale filter)
+    7. srt+pysubs2 tricky chars round-trip
+    8. ffmpeg burn tricky SRT
+    9. rclone CLI without config (fail-soft check)
+    10. 2× concurrent Playwright contexts (isolation)
+
+  Verified 10/10 Pass on live cluster. Both scripts exit non-zero on failure —
+  safe for CI/pre-push gates.
+
+### Documentation
+- README.md + README_zh-TW.md `## Testing / ## 測試` sections now include a
+  "Video Pipeline E2E Tests" subsection with kubectl-based run instructions,
+  suite coverage table, and reference to CHANGELOG [0.16.2] for prerequisites.
+
 ## [0.16.2] - 2026-07-30
 
 ### Added

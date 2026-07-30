@@ -720,6 +720,27 @@ npx playwright test
 
 Tests cover: login flow, chat message send/receive, model picker, skills page, memory page.
 
+### Video Pipeline E2E Tests
+
+Two adversarial tests for the slide-to-video pipeline (introduced in [0.16.2]).
+Both scripts run entirely inside the hermes-agent pod, generate assets inline,
+and exit non-zero on any failure — safe for CI.
+
+```bash
+# Run inside the hermes-agent pod (deps must be installed — see 0.16.2 changelog)
+kubectl -n hermes cp tests/video-e2e-happy.sh <pod>:/tmp/vhap.sh -c hermes-agent
+kubectl -n hermes cp tests/video-e2e-edges.sh <pod>:/tmp/vedg.sh -c hermes-agent
+kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vhap.sh
+kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
+```
+
+| Suite | What it covers | Duration |
+|-------|----------------|----------|
+| **video-e2e-happy.sh** | Full happy-path: 3-slide HTML → edge-tts EN×2 narration → Playwright headless WebM capture (1280×720) → ffmpeg segment build with audio alignment → concat demuxer → srt+pysubs2 subtitle round-trip → ffmpeg burn subtitles → ffprobe quality gates (h264+aac, resolution, size, duration) | ~60-90s |
+| **video-e2e-edges.sh** | 10 adversarial edge cases: empty TTS input, 60s+ narration, emoji/CJK/URL/quotes, 0.3s micro-capture, 1920×1080 scroll-through, mixed-resolution concat, tricky-char SRT round-trip, subtitle burn with special chars, rclone dry-run without config, 2× concurrent Playwright contexts | ~90-120s |
+
+Both were verified on the woow-k3s live cluster: 6/6 happy stages + 10/10 edges = **16/16 pass** (see [CHANGELOG.md](CHANGELOG.md) [0.16.2]).
+
 Full test documentation:
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — Test requirements
 - [tests/TEST-REPORT-enterprise.md](tests/TEST-REPORT-enterprise.md) — Test results

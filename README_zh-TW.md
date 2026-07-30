@@ -669,6 +669,26 @@ npx playwright test
 
 測試涵蓋：登入流程、發送/接收對話、模型選擇器、技能頁面、記憶頁面。
 
+### 影片 Pipeline E2E 測試
+
+針對 [0.16.2] 新增的簡報轉影片流水線設計的兩個對抗性測試。腳本完全跑在
+hermes-agent 容器內、素材當場產生、任一失敗即 exit non-zero —— CI 友好。
+
+```bash
+# 在 hermes-agent pod 內執行（依賴需已安裝，見 0.16.2 更新日誌）
+kubectl -n hermes cp tests/video-e2e-happy.sh <pod>:/tmp/vhap.sh -c hermes-agent
+kubectl -n hermes cp tests/video-e2e-edges.sh <pod>:/tmp/vedg.sh -c hermes-agent
+kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vhap.sh
+kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
+```
+
+| 套件 | 涵蓋內容 | 時間 |
+|------|---------|------|
+| **video-e2e-happy.sh** | 完整快樂路徑：3 頁 HTML → edge-tts 英文旁白 ×2 → Playwright headless 錄 WebM (1280×720) → ffmpeg 音訊對齊 segment → concat demuxer → srt+pysubs2 字幕來回驗證 → ffmpeg 燒錄字幕 → ffprobe 品質關卡（h264+aac、解析度、大小、時長） | ~60-90 秒 |
+| **video-e2e-edges.sh** | 10 個對抗性邊緣：空 TTS 輸入、60+秒長段旁白、emoji/中文/URL/引號、0.3 秒微型錄影、1920×1080 滾動錄影、混合解析度 concat、字元刁鑽 SRT 來回、字幕含特殊字元燒錄、rclone 無 config dry-run、Playwright 雙並行 context | ~90-120 秒 |
+
+已在 woow-k3s 生產叢集驗證：快樂路徑 6/6 + 邊緣 10/10 = **16/16 全通過**（詳見 [CHANGELOG.md](CHANGELOG.md) [0.16.2]）。
+
 完整測試文件：
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — 測試需求
 - [tests/TEST-REPORT-enterprise.md](tests/TEST-REPORT-enterprise.md) — 測試結果
