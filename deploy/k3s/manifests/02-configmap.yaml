@@ -24,8 +24,6 @@ data:
   # Domain
   HERMES_DOMAIN: "__DOMAIN__"
   HERMES_BASE_URL: "https://__DOMAIN__"
-  # WebUI
-  HERMES_WEBUI_PORT: "8787"
   # Agent
   HERMES_AGENT_PORT: "8642"
   # Database

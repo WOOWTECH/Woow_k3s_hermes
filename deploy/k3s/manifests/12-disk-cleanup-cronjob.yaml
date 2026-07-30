@@ -1,5 +1,5 @@
 # =============================================================
-# Disk Cleanup CronJob — hermes-webui-data PVC hygiene
+# Disk Cleanup CronJob — hermes agent PVC hygiene
 # =============================================================
 # Why: state.db grows unbounded (messages FTS index), request_dump_*.json
 #      accumulates one file per agent request (had 3724 files = 535MB in
@@ -10,8 +10,7 @@
 # What: Nightly (03:00 UTC) prune of stale on-PVC files that hermes-agent
 #       never reads back — request_dump_* over 7 days, _run_journal over
 #       30 days, curator logs over 30 days, rotated gateway logs beyond
-#       the newest 3, plus explicit backup dirs (webui/sessions.bak-*,
-#       state.db*.wipe-bak-*).
+#       the newest 3, plus explicit backup dirs from prior manual wipes.
 #
 # Longhorn RWO note: The volume is single-node RWO, so this pod MUST run
 # on the same node as the hermes pod. `podAffinity` on `app=hermes`
@@ -21,6 +20,7 @@
 # online expansion:
 #   kubectl -n __NAMESPACE__ patch pvc hermes-webui-data \
 #     -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
+# (PVC name retained for backward compatibility.)
 # =============================================================
 apiVersion: batch/v1
 kind: CronJob

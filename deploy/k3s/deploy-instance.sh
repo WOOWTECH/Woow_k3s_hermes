@@ -12,7 +12,6 @@ K="kubectl --context $CONTEXT -n $NS"
 NEW_API_KEY="${MINIMAX_API_KEY:?Set MINIMAX_API_KEY env var}"
 NEW_KEY_B64=$(echo -n "$NEW_API_KEY" | base64 -w0)
 IMAGE="nousresearch/hermes-agent:latest"
-WEBUI_IMAGE="ghcr.io/nesquena/hermes-webui:latest"
 
 PG_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
 API_KEY=$(openssl rand -hex 32)
@@ -44,7 +43,6 @@ data:
   HERMES_BASE_URL: "https://$DOMAIN"
   HERMES_DOMAIN: "$DOMAIN"
   HERMES_AGENT_PORT: "8642"
-  HERMES_WEBUI_PORT: "8787"
   POSTGRES_DB: hermes
   POSTGRES_HOST: ${PREFIX}-postgresql-svc
   POSTGRES_PORT: "5432"
@@ -190,18 +188,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${PREFIX}-webui-svc
-spec:
-  selector:
-    app: ${PREFIX}
-  ports:
-  - port: 8787
-    targetPort: 8787
-    name: http
----
-apiVersion: v1
-kind: Service
-metadata:
   name: ${PREFIX}-postgresql-svc
 spec:
   selector:
@@ -309,81 +295,6 @@ spec:
         - {name: hermes-data, mountPath: /opt/data}
         - {name: playwright-shared, mountPath: /shared-pw}
         - {name: tools-shared, mountPath: /shared-tools}
-      - name: hermes-webui
-        image: ${WEBUI_IMAGE}
-        imagePullPolicy: Always
-        command: [sh, -c]
-        args:
-        - |
-          mkdir -p /home/hermeswebui/.hermes
-          echo "MINIMAX_API_KEY=\${MINIMAX_API_KEY}" > /home/hermeswebui/.hermes/.env
-          chmod 644 /home/hermeswebui/.hermes/.env
-          for i in \$(seq 1 90); do
-            HTTP=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8642/ 2>/dev/null)
-            [ "\$HTTP" = "200" ] || [ "\$HTTP" = "404" ] && break
-            sleep 2
-          done
-          (while true; do
-            NOW=\$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")
-            printf '{"gateway_state":"running","updated_at":"%s","pid":1,"platform":"hermes-agent","version":"0.13.0"}\n' "\$NOW" > /home/hermeswebui/.hermes/gateway_state.json 2>/dev/null
-            sleep 25
-          done) &
-          rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
-          if [ -f /hermeswebui_init.bash ]; then
-            sed -i 's/chmod 700 "\$itdir"/chmod 755 "\$itdir"/' /hermeswebui_init.bash 2>/dev/null
-            sed -i '/cd \/app; python server.py/i test -f /home/hermeswebui/.hermes/replace_icons.sh && sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true' /hermeswebui_init.bash 2>/dev/null
-            exec /hermeswebui_init.bash
-          else
-            echo "WebUI init script not found, sleeping..."
-            sleep infinity
-          fi
-        env:
-        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
-        - name: HERMES_WEBUI_GATEWAY_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ${PREFIX}-secrets
-              key: API_SERVER_KEY
-        - name: MINIMAX_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ${PREFIX}-secrets
-              key: MINIMAX_API_KEY
-        - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
-        - {name: LD_LIBRARY_PATH, value: /opt/shared-tools/lib}
-        - {name: PATH, value: "/opt/shared-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
-        - {name: HERMES_WEBUI_PORT, value: "8787"}
-        - {name: HERMES_WEBUI_STATE_DIR, value: /home/hermeswebui/.hermes/webui}
-        - {name: HERMES_HOME, value: /home/hermeswebui/.hermes}
-        - {name: WANTED_UID, value: "1000"}
-        - {name: WANTED_GID, value: "1000"}
-        - {name: GATEWAY_HEALTH_URL, value: "http://localhost:8642"}
-        - {name: HERMES_WEBUI_PASSWORD, value: "\${WEBUI_PASSWORD:-changeme}"}
-        tty: true
-        ports:
-        - {containerPort: 8787, name: http}
-        resources:
-          requests: {cpu: 500m, memory: 512Mi}
-          limits: {cpu: "2", memory: 2Gi}
-        lifecycle:
-          postStart:
-            exec:
-              command: [sh, /home/hermeswebui/.hermes/replace_icons.sh]
-        livenessProbe:
-          tcpSocket: {port: 8787}
-          initialDelaySeconds: 90
-          periodSeconds: 30
-          failureThreshold: 5
-        readinessProbe:
-          tcpSocket: {port: 8787}
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          failureThreshold: 12
-        volumeMounts:
-        - {name: hermes-data, mountPath: /home/hermeswebui/.hermes}
-        - {name: playwright-shared, mountPath: /opt/playwright-browsers}
-        - {name: tools-shared, mountPath: /opt/shared-tools}
       volumes:
       - name: hermes-data
         persistentVolumeClaim:

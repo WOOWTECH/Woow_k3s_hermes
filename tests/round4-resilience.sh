@@ -50,15 +50,6 @@ else
   fail "Redis recovery" "timeout 60s"
 fi
 
-# 4.4 WebUI restart
-echo "-- 4.4 WebUI restart --"
-kubectl -n "$NAMESPACE" delete pod -l "$WEBUI_LABEL" --grace-period=5 > /dev/null 2>&1
-if kubectl -n "$NAMESPACE" wait --for=condition=ready pod -l "$WEBUI_LABEL" --timeout=120s > /dev/null 2>&1; then
-  pass "WebUI pod recovered"
-else
-  fail "WebUI recovery" "timeout 120s"
-fi
-
 # 4.5 Cloudflared restart + tunnel reconnect
 echo "-- 4.5 Cloudflared restart --"
 kubectl -n "$NAMESPACE" rollout restart deployment/$CLOUDFLARED_DEPLOY > /dev/null 2>&1

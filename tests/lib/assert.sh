@@ -21,7 +21,6 @@ summary() {
 kexec_agent()  { kubectl -n "$NAMESPACE" exec deployment/hermes-agent    -- "$@" 2>&1; }
 kexec_pg()     { kubectl -n "$NAMESPACE" exec deployment/hermes-postgresql -- "$@" 2>&1; }
 kexec_redis()  { kubectl -n "$NAMESPACE" exec deployment/hermes-redis    -- "$@" 2>&1; }
-kexec_webui()  { kubectl -n "$NAMESPACE" exec deployment/hermes-webui    -- "$@" 2>&1; }
 kexec_cf()     { kubectl -n "$NAMESPACE" exec deployment/cloudflared     -- "$@" 2>&1; }
 
 http_code() { curl -s -o /dev/null -w "%{http_code}" --max-time 10 $CURL_RESOLVE "$@" 2>&1; }

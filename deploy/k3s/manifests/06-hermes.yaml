@@ -1,9 +1,7 @@
 # =============================================================
-# Hermes - Combined Agent + WebUI Deployment (Sidecar)
+# Hermes - Agent Deployment (single container)
 # =============================================================
-# Both containers share the same Pod for localhost communication.
 # Agent: nousresearch/hermes-agent:latest (Gateway:8642, Dashboard:9119)
-# WebUI: ghcr.io/nesquena/hermes-webui:latest (:8787)
 # =============================================================
 apiVersion: apps/v1
 kind: Deployment

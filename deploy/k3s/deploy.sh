@@ -142,7 +142,6 @@ for manifest in \
     04-postgresql.yaml \
     05-redis.yaml \
     06-hermes-agent.yaml \
-    07-hermes-webui.yaml \
     08-cloudflared.yaml \
     09-ingress.yaml \
     10-network-policy.yaml; do
@@ -172,9 +171,6 @@ echo ""
 info "Waiting for Hermes Agent to be ready..."
 kubectl rollout status deployment/hermes-agent -n "${NAMESPACE}" --timeout=180s || warn "Agent not ready yet."
 
-info "Waiting for Hermes WebUI to be ready..."
-kubectl rollout status deployment/hermes-webui -n "${NAMESPACE}" --timeout=120s || warn "WebUI not ready yet."
-
 echo ""
 
 # ─────────────────────────────────────────────────
@@ -185,11 +181,11 @@ ROUTE_RESPONSE=$(curl -s -X PUT \
     "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${CF_TUNNEL_ID}/configurations" \
     -H "Authorization: Bearer ${CF_API_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "{\"config\":{\"ingress\":[{\"hostname\":\"${DOMAIN}\",\"service\":\"http://hermes-webui-svc.${NAMESPACE}.svc.cluster.local:8787\"},{\"service\":\"http_status:404\"}]}}")
+    -d "{\"config\":{\"ingress\":[{\"hostname\":\"${DOMAIN}\",\"service\":\"http://hermes-agent-svc.${NAMESPACE}.svc.cluster.local:9119\"},{\"service\":\"http_status:404\"}]}}")
 
 ROUTE_SUCCESS=$(echo "${ROUTE_RESPONSE}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success','false'))" 2>/dev/null || echo "false")
 if [ "${ROUTE_SUCCESS}" = "True" ] || [ "${ROUTE_SUCCESS}" = "true" ]; then
-    ok "Cloudflare route: ${DOMAIN} → hermes-webui-svc:8787"
+    ok "Cloudflare route: ${DOMAIN} → hermes-agent-svc:9119 (dashboard)"
 else
     warn "Cloudflare route config may have failed. Response: ${ROUTE_RESPONSE}"
 fi

@@ -25,18 +25,6 @@ else
   skip "Agent dashboard TCP 9119" "proc/net/tcp unavailable"
 fi
 
-# 2.3 WebUI HTTP 8787
-WEBUI_CODE=$(kubectl -n "$NAMESPACE" run http-probe-webui --rm -i --restart=Never \
-  --image=busybox --command -- sh -c "wget -q -O /dev/null -S http://$WEBUI_SVC:$WEBUI_PORT/ 2>&1 | head -1" 2>/dev/null | tail -1)
-if echo "$WEBUI_CODE" | grep -qE "200|302|301"; then
-  pass "WebUI HTTP $WEBUI_PORT responds ($WEBUI_CODE)"
-else
-  # Fallback: just check TCP
-  RESULT=$(kubectl -n "$NAMESPACE" run tcp-probe-webui --rm -i --restart=Never \
-    --image=busybox --command -- sh -c "nc -z -w 3 $WEBUI_SVC $WEBUI_PORT && echo OK" 2>/dev/null | tail -1)
-  [[ "$RESULT" == *"OK"* ]] && pass "WebUI TCP $WEBUI_PORT reachable" || fail "WebUI HTTP" "not responding"
-fi
-
 # 2.4 Cloudflared /ready
 CF_READY=$(kexec_cf wget -q -O- http://localhost:$CF_METRICS_PORT/ready 2>/dev/null)
 [[ "$?" -eq 0 || -n "$CF_READY" ]] && pass "Cloudflared /ready responds" || fail "Cloudflared /ready" "no response"

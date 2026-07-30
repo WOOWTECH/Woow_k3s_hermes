@@ -36,9 +36,10 @@ spec:
     requests:
       storage: 5Gi
 ---
-# --- Hermes WebUI Data (5Gi, longhorn) ---
-# Shared volume for the combined hermes sidecar pod
-# Mounted at /opt/data (agent) and /home/hermeswebui/.hermes (webui)
+# --- Hermes Agent Data (5Gi, longhorn) ---
+# Persistent volume for the hermes agent, mounted at /opt/data.
+# Name is retained (hermes-webui-data) for backward compatibility with
+# existing PVs from prior sidecar-era deployments.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

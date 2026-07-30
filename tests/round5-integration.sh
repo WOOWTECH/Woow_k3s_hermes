@@ -6,17 +6,6 @@ source "$SCRIPT_DIR/lib/assert.sh"
 
 section "Round 5: Cross-Service Integration (10 tests)"
 
-# 5.1 WebUI -> Agent connectivity
-echo "-- 5.1 WebUI -> Agent --"
-RESULT=$(kexec_webui sh -c "wget -q -O /dev/null -S http://$AGENT_SVC:$AGENT_PORT/ 2>&1 | head -1" 2>/dev/null || echo "FAILED")
-if echo "$RESULT" | grep -qE "HTTP|200|302|404|405"; then
-  pass "WebUI -> Agent: $RESULT"
-else
-  # Fallback DNS check
-  DNS=$(kexec_webui sh -c "getent hosts $AGENT_SVC 2>/dev/null || nslookup $AGENT_SVC 2>/dev/null" 2>/dev/null)
-  [[ -n "$DNS" ]] && pass "WebUI -> Agent DNS resolves" || fail "WebUI -> Agent" "no connectivity"
-fi
-
 # 5.2 Agent -> PostgreSQL TCP
 echo "-- 5.2 Agent -> PostgreSQL --"
 RESULT=$(kexec_agent sh -c "timeout 5 sh -c 'echo | cat > /dev/tcp/$POSTGRES_SVC/$POSTGRES_PORT' 2>&1 && echo CONNECTED" 2>/dev/null)
@@ -37,22 +26,13 @@ else
   [[ -n "$DNS" ]] && pass "Agent -> Redis DNS resolves" || fail "Agent -> Redis" "no connectivity"
 fi
 
-# 5.4 External -> WebUI e2e
-echo "-- 5.4 External -> WebUI --"
+# 5.4 External -> Agent e2e
+echo "-- 5.4 External -> Agent --"
 CODE=$(http_code "$EXTERNAL_URL" -k)
 if [[ "$CODE" =~ ^[23] ]]; then
-  pass "External -> WebUI: HTTP $CODE"
+  pass "External -> Agent: HTTP $CODE"
 else
-  fail "External -> WebUI" "http=$CODE"
-fi
-
-# 5.5 Ingress / -> WebUI
-echo "-- 5.5 Ingress / -> WebUI --"
-CODE=$(http_code "$EXTERNAL_URL/" -k)
-if [[ "$CODE" =~ ^[23] ]]; then
-  pass "Ingress / -> WebUI: HTTP $CODE"
-else
-  fail "Ingress /" "http=$CODE"
+  fail "External -> Agent" "http=$CODE"
 fi
 
 # 5.6 Ingress /api -> Agent
@@ -69,14 +49,12 @@ echo "-- 5.7 ConfigMap values --"
 PG_HOST=$(kubectl -n "$NAMESPACE" get configmap hermes-config -o jsonpath='{.data.POSTGRES_HOST}' 2>/dev/null)
 RD_HOST=$(kubectl -n "$NAMESPACE" get configmap hermes-config -o jsonpath='{.data.REDIS_HOST}' 2>/dev/null)
 PG_PORT=$(kubectl -n "$NAMESPACE" get configmap hermes-config -o jsonpath='{.data.POSTGRES_PORT}' 2>/dev/null)
-WUI_PORT=$(kubectl -n "$NAMESPACE" get configmap hermes-config -o jsonpath='{.data.HERMES_WEBUI_PORT}' 2>/dev/null)
 AGT_PORT=$(kubectl -n "$NAMESPACE" get configmap hermes-config -o jsonpath='{.data.HERMES_AGENT_PORT}' 2>/dev/null)
 if [[ "$PG_HOST" == "$POSTGRES_SVC" && "$RD_HOST" == "$REDIS_SVC" && \
-      "$PG_PORT" == "$POSTGRES_PORT" && "$WUI_PORT" == "$WEBUI_PORT" && \
-      "$AGT_PORT" == "$AGENT_PORT" ]]; then
+      "$PG_PORT" == "$POSTGRES_PORT" && "$AGT_PORT" == "$AGENT_PORT" ]]; then
   pass "ConfigMap values correct"
 else
-  fail "ConfigMap" "PG=$PG_HOST:$PG_PORT RD=$RD_HOST WUI=$WUI_PORT AGT=$AGT_PORT"
+  fail "ConfigMap" "PG=$PG_HOST:$PG_PORT RD=$RD_HOST AGT=$AGT_PORT"
 fi
 
 # 5.8 Secrets exist & non-empty

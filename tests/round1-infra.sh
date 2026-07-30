@@ -11,7 +11,6 @@ for pair in \
   "$POSTGRES_LABEL|PostgreSQL" \
   "$REDIS_LABEL|Redis" \
   "$AGENT_LABEL|Agent" \
-  "$WEBUI_LABEL|WebUI" \
   "$CLOUDFLARED_LABEL|Cloudflared"; do
   LABEL="${pair%%|*}"; NAME="${pair##*|}"
   PHASE=$(kubectl -n "$NAMESPACE" get pods -l "$LABEL" -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
@@ -24,7 +23,7 @@ for pair in \
 done
 
 # 1.6-1.9 Service ClusterIP
-for svc in "$POSTGRES_SVC" "$REDIS_SVC" "$AGENT_SVC" "$WEBUI_SVC"; do
+for svc in "$POSTGRES_SVC" "$REDIS_SVC" "$AGENT_SVC"; do
   CIP=$(kubectl -n "$NAMESPACE" get svc "$svc" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
   if [[ -n "$CIP" && "$CIP" != "None" ]]; then
     pass "$svc ClusterIP=$CIP"
