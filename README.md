@@ -72,16 +72,6 @@
 | Complex Kubernetes setup | **One-command deployment** with `deploy.sh` + golden configs |
 | Single-tenant only | **Multi-instance** with namespace isolation + per-tenant branding |
 
-### Live Instances
-
-| Instance | Domain | Purpose |
-|----------|--------|---------|
-| WoowTech | `woowtech-hermes.woowtech.io` | Odoo 18 ERP Consultant |
-| Apporo Alan | `apporoalan-hermes.woowtech.io` | ESG/WELL/LEED Building Consultant |
-| Johhan Lin | `johhanlin-hermes.woowtech.io` | Forex Consultant |
-| Alan Lin | `alanlin-hermes.woowtech.io` | General AI Assistant |
-| TorchMedia | `torchmedia-hermes.woowtech.io` | General AI Assistant |
-
 ---
 
 ## Key Features
@@ -154,29 +144,25 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph CF["Cloudflare DNS (*.woowtech.io)"]
+    subgraph CF["Cloudflare DNS (*.example.com)"]
         DNS["Wildcard DNS"]
     end
 
-    subgraph K3s["K3s Cluster (4 nodes, 1024 cores, 502Gi RAM)"]
-        subgraph NS1["namespace: hermes"]
-            I1["WoowTech Hermes<br/>Odoo 18 ERP Consultant"]
+    subgraph K3s["K3s Cluster"]
+        subgraph NS1["namespace: <tenant-a>-hermes"]
+            I1["Tenant A Hermes"]
         end
-        subgraph NS2["namespace: apporoalan-hermes"]
-            I2["Apporo Hermes<br/>ESG/WELL/LEED Consultant"]
+        subgraph NS2["namespace: <tenant-b>-hermes"]
+            I2["Tenant B Hermes"]
         end
-        subgraph NS3["namespace: alanlin-hermes"]
-            I3["Alan Lin Hermes<br/>General AI Assistant"]
-        end
-        subgraph NS4["namespace: torchmedia-hermes"]
-            I4["TorchMedia Hermes<br/>General AI Assistant"]
+        subgraph NSN["namespace: <tenant-n>-hermes"]
+            IN["Tenant N Hermes"]
         end
     end
 
     DNS --> I1
     DNS --> I2
-    DNS --> I3
-    DNS --> I4
+    DNS --> IN
 ```
 
 ### Request Flow
@@ -437,7 +423,6 @@ The terminal is deployed as a separate lightweight pod (`deploy/k3s/manifests/11
 | **Storage** | Longhorn PVC (5Gi) | Named volumes |
 | **Networking** | Ingress + NetworkPolicy | Port mapping |
 | **HTTPS** | Cloudflare Tunnel (sidecar) | Manual / reverse proxy |
-| **Branding** | Per-namespace via deploy scripts | `apply_branding.py` |
 | **Resources** | Shared across cluster nodes | Dedicated host (8GB+ RAM) |
 
 ### K3s Deployment
@@ -553,69 +538,16 @@ Each instance runs in an isolated Kubernetes namespace with its own:
 - Persistent volume (5Gi Longhorn PVC)
 - PostgreSQL + Redis
 - Cloudflare Tunnel
-- Branding configuration
-
-### Instance Registry (`instances/instances.json`)
-
-```json
-{
-  "instances": {
-    "woowtech": {
-      "namespace": "hermes",
-      "domain": "woowtech-hermes.woowtech.io",
-      "purpose": "WoowTech Odoo 18 ERP Consultant"
-    },
-    "apporoalan": {
-      "namespace": "apporoalan-hermes",
-      "domain": "apporoalan-hermes.woowtech.io",
-      "purpose": "ESG/WELL/LEED Building Consultant"
-    }
-  }
-}
-```
 
 ### Deploy New Instance
 
 ```bash
 cd deploy/k3s
-bash deploy-instance.sh <instance-name>
+bash deploy-instance.sh <prefix> <domain>
+# e.g. bash deploy-instance.sh example example-hermes.example.com
 ```
 
-This creates the namespace, applies all manifests with substituted values, sets up Cloudflare Tunnel, and applies branding.
-
----
-
-## White-Label Branding
-
-Each instance can have custom branding (logo, colors, title, favicon). Branding templates are in `branding/`:
-
-```
-branding/
-  woowtech/          # WoowTech brand
-    apply_branding_woowtech.py
-    deploy-woowtech-hermes.sh
-    replace_icons.sh
-    icons/            # Custom favicon set
-    SKILL.md          # AI personality prompt
-  apporo/             # Apporo brand
-    apply_branding_apporo.py
-    deploy-apporo-hermes.sh
-    replace_icons.sh
-    icons/
-    SKILL.md
-  template-icons/     # SVG source icons
-    favicon.svg
-    woowtech-logo-original.svg
-    apporo-logo.svg
-```
-
-### Creating a New Brand
-
-1. Copy an existing brand directory: `cp -r branding/woowtech branding/mybrand`
-2. Replace icon files in `branding/mybrand/icons/`
-3. Edit `apply_branding_mybrand.py` with new colors and title
-4. Edit `SKILL.md` with the brand's AI personality
-5. Run: `bash branding/mybrand/deploy-mybrand-hermes.sh`
+This creates the namespace, applies all manifests with substituted values, and sets up the Cloudflare Tunnel.
 
 ---
 

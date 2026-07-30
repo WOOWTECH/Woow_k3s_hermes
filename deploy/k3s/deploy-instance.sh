@@ -1,6 +1,7 @@
 #!/bin/bash
-# Deploy a single Hermes instance in apporoalan-hermes namespace
+# Deploy a single Hermes instance in <prefix>-hermes namespace
 # Usage: ./deploy-instance.sh <prefix> <domain>
+# Example: ./deploy-instance.sh example example-hermes.example.com
 set -euo pipefail
 
 PREFIX="${1:?Usage: $0 <prefix> <domain>}"

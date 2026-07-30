@@ -44,8 +44,6 @@ the entire OpenClaw branch (including `openclaw-k3s-paas/`, `setup-wizard/`,
 | `deploy/podman/` | Podman deployment scripts and compose |
 | `config/` | Golden configs, model routes, env patches |
 | `docker/` | Custom Hermes Agent Dockerfile |
-| `branding/` | Per-instance branding assets |
-| `instances/` | Multi-instance registry and configs |
 | `tests/` | Test suites and reports |
 | `docs/` | Screenshots, user manual, API docs |
 | `skills/` | Hermes skill definitions |

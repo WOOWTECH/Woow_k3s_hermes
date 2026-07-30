@@ -62,6 +62,5 @@ Both upstream APIs (hermes-agent, hermes-webui) are validated as part of our dep
 - Container images: upstream (hermes-agent v0.15.1, hermes-webui v0.51.432)
 - API contract validation: this deployment pipeline
 - Configuration: golden-config.yaml, golden-settings.json, SOUL.md
-- Branding: apply_branding.py (Apporo v2 SVG)
 - Skills: 104 skills (26 built-in + 14 Superpowers + custom KNX/WELL/ESG)
 - Infrastructure: K8s manifests, CF tunnel routing, DNS, TLS

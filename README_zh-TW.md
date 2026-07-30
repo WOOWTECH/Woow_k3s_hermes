@@ -69,16 +69,6 @@
 | Kubernetes 部署複雜 | **一鍵部署** `deploy.sh` + 黃金配置 |
 | 僅支援單租戶 | **多實例隔離**，命名空間隔離 + 每租戶獨立品牌 |
 
-### 線上實例
-
-| 實例 | 網域 | 用途 |
-|------|------|------|
-| WoowTech | `woowtech-hermes.woowtech.io` | Odoo 18 ERP 顧問 |
-| Apporo Alan | `apporoalan-hermes.woowtech.io` | ESG/WELL/LEED 健康建築顧問 |
-| Johhan Lin | `johhanlin-hermes.woowtech.io` | HSBC 外匯交易顧問 |
-| Alan Lin | `alanlin-hermes.woowtech.io` | 通用 AI 助手 |
-| TorchMedia | `torchmedia-hermes.woowtech.io` | 通用 AI 助手 |
-
 ---
 
 ## 核心功能
@@ -151,29 +141,25 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph CF["Cloudflare DNS (*.woowtech.io)"]
+    subgraph CF["Cloudflare DNS (*.example.com)"]
         DNS["萬用 DNS"]
     end
 
-    subgraph K3s["K3s 叢集（4 節點，1024 cores，502Gi RAM）"]
-        subgraph NS1["namespace: hermes"]
-            I1["WoowTech Hermes<br/>Odoo 18 ERP 顧問"]
+    subgraph K3s["K3s 叢集"]
+        subgraph NS1["namespace: <tenant-a>-hermes"]
+            I1["Tenant A Hermes"]
         end
-        subgraph NS2["namespace: apporoalan-hermes"]
-            I2["Apporo Hermes<br/>ESG/WELL/LEED 顧問"]
+        subgraph NS2["namespace: <tenant-b>-hermes"]
+            I2["Tenant B Hermes"]
         end
-        subgraph NS3["namespace: alanlin-hermes"]
-            I3["Alan Lin Hermes<br/>通用 AI 助手"]
-        end
-        subgraph NS4["namespace: torchmedia-hermes"]
-            I4["TorchMedia Hermes<br/>通用 AI 助手"]
+        subgraph NSN["namespace: <tenant-n>-hermes"]
+            IN["Tenant N Hermes"]
         end
     end
 
     DNS --> I1
     DNS --> I2
-    DNS --> I3
-    DNS --> I4
+    DNS --> IN
 ```
 
 ### 請求流程
@@ -390,7 +376,6 @@ URL:  https://<PREFIX>-hermes-terminal.woowtech.io
 | **儲存** | Longhorn PVC（5Gi） | 具名磁碟區 |
 | **網路** | Ingress + NetworkPolicy | 端口映射 |
 | **HTTPS** | Cloudflare Tunnel（Sidecar） | 手動 / 反向代理 |
-| **品牌** | 每命名空間獨立部署腳本 | `apply_branding.py` |
 | **資源需求** | 共享叢集節點 | 獨立主機（8GB+ RAM） |
 
 ### K3s 部署
@@ -502,69 +487,16 @@ docker push <registry>/hermes-agent-custom:latest
 - 獨立持久化磁碟區（5Gi Longhorn PVC）
 - 獨立 PostgreSQL + Redis
 - 獨立 Cloudflare Tunnel
-- 獨立品牌配置
-
-### 實例登記表（`instances/instances.json`）
-
-```json
-{
-  "instances": {
-    "woowtech": {
-      "namespace": "hermes",
-      "domain": "woowtech-hermes.woowtech.io",
-      "purpose": "WoowTech Odoo 18 ERP 顧問"
-    },
-    "apporoalan": {
-      "namespace": "apporoalan-hermes",
-      "domain": "apporoalan-hermes.woowtech.io",
-      "purpose": "ESG/WELL/LEED 健康建築顧問"
-    }
-  }
-}
-```
 
 ### 部署新實例
 
 ```bash
 cd deploy/k3s
-bash deploy-instance.sh <instance-name>
+bash deploy-instance.sh <prefix> <domain>
+# 例如：bash deploy-instance.sh example example-hermes.example.com
 ```
 
-此命令會建立命名空間、套用所有 manifest（帶入替換值）、設定 Cloudflare Tunnel 並套用品牌。
-
----
-
-## 白標品牌
-
-每個實例可擁有自訂品牌（Logo、顏色、標題、Favicon）。品牌模板位於 `branding/`：
-
-```
-branding/
-  woowtech/          # WoowTech 品牌
-    apply_branding_woowtech.py
-    deploy-woowtech-hermes.sh
-    replace_icons.sh
-    icons/            # 自訂 Favicon 組
-    SKILL.md          # AI 人格提示詞
-  apporo/             # Apporo 品牌
-    apply_branding_apporo.py
-    deploy-apporo-hermes.sh
-    replace_icons.sh
-    icons/
-    SKILL.md
-  template-icons/     # SVG 原始圖標
-    favicon.svg
-    woowtech-logo-original.svg
-    apporo-logo.svg
-```
-
-### 建立新品牌
-
-1. 複製現有品牌目錄：`cp -r branding/woowtech branding/mybrand`
-2. 替換 `branding/mybrand/icons/` 中的圖標檔案
-3. 編輯 `apply_branding_mybrand.py` 設定新顏色和標題
-4. 編輯 `SKILL.md` 設定品牌的 AI 人格
-5. 執行：`bash branding/mybrand/deploy-mybrand-hermes.sh`
+此命令會建立命名空間、套用所有 manifest（帶入替換值），並設定 Cloudflare Tunnel。
 
 ---
 
