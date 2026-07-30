@@ -152,3 +152,75 @@ persistent stdin pipe pattern to keep the CLI waiting for your paste:
       # ... browse to URL, get callback URL, then:
       echo "<callback-url>" > /tmp/oauth_stdin
     '
+
+---
+
+## 5. Which chat surface can invoke ffmpeg / edge-tts / rclone / playwright?
+
+**TL;DR** — the **Dashboard TUI on port 9119** (`https://<dashboard-host>/chat`),
+NOT the WebUI on port 8787. They run in **different containers** and expose
+different tool sets.
+
+### Container-vs-tool matrix (verified 2026-07-30 on woow-k3s live cluster)
+
+| Tool | hermes-agent container | hermes-webui container |
+|------|------------------------|------------------------|
+| `hermes` CLI + 61 subcommands | ✓ /usr/local/bin | ✗ |
+| `ffmpeg` / `ffprobe` / `ffplay` 7.1.5 | ✓ /usr/bin | ✗ |
+| `edge-tts` CLI + `edge_tts` python module | ✓ (installer wires both) | ✗ |
+| `rclone` v1.74.4 | ✓ /opt/data/bin | ✗ |
+| `node` v22 + `npm` | ✓ | ✗ |
+| `playwright` python + Chromium 149 | ✓ (installer) | ✗ |
+| `officecli` 1.0.135 | ✓ | ✓ (via /shared-tools sidecar + `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true` + `/usr/local/bin` symlink) |
+| `python3` | 3.13.5 (hermes venv) | 3.12.13 + pip |
+| `curl` | ✓ | ✓ |
+
+Everything else is agent-only.
+
+### Which chat runs in which container?
+
+| Chat surface | Runs in | Composer type | Can invoke video pipeline? |
+|--------------|---------|---------------|-----|
+| **WebUI chat** (port 8787, `https://<host>/chat`) | **hermes-webui** container | Native HTML form + streaming | ❌ **NO** — webui container has none of ffmpeg/edge-tts/rclone/playwright |
+| **Dashboard TUI** (port 9119, `https://<dashboard-host>/chat`) | **hermes-agent** container (xterm.js REPL of `hermes chat`) | xterm.js live terminal | ✅ **YES** — full agent-container tool access (13 native tools + 144 skills + 6 MCP servers) |
+
+The WebUI terminal tool spawns from webui-container's shell, not proxied to
+the agent. Same limitation applies to WebUI's file/write tool paths — they
+resolve inside webui-container's filesystem, which mostly overlaps with the
+PVC via `/home/hermeswebui/.hermes` but does NOT see agent-only paths like
+`/opt/hermes/.venv/` or `/usr/bin/ffmpeg`.
+
+**Practical guidance**
+
+- Interactive Q&A, MCP tool calls (Odoo/HA/browserless/etc.), skill lookups
+  → WebUI chat is fine and preferred (nicer UI, mobile-friendly).
+- Video pipeline, batch shell jobs, anything needing ffmpeg/edge-tts/rclone,
+  Playwright captures, or any local CLI beyond `python3+curl+officecli`
+  → Dashboard TUI or a `hermes cron` job.
+- Neither surface should be the primary automation entry point for
+  production — use `hermes cron` (already runs in agent container) for
+  scheduled batches.
+
+### Verified evidence — Dashboard TUI orchestrating video pipeline
+
+Two end-to-end tests run from Dashboard TUI (`Chat` tab on port-9119 dashboard):
+
+| Test | Prompt | Agent tool calls | Output |
+|------|--------|------------------|--------|
+| **T1 micro** | Inline 4-step: `mkdir` + `edge-tts` + `ffmpeg` + `ffprobe` | Terminal ×5 (0.0-2.0s each) | 640×360 3.19s h264+aac 29859-byte MP4 |
+| **T2 full** | `bash /opt/data/t2_full_pipeline.sh` (2-slide HTML → 2 TTS → 2 Playwright captures → 2 segments → concat) | Terminal ×1 (12.4s wall time) | 960×540 7.099s h264+aac 426349-byte MP4 |
+
+T2 was completed in a **single agent turn** (~1 minute total), consuming
+~20k of 196k context window (10%). Same script under `tests/video-tui-t2-pipeline.sh`.
+
+### WebUI chat quick smoke
+
+If you MUST test something video-pipeline-shaped from WebUI, keep it to what
+webui-container actually has:
+
+    Use terminal to run: python3 -c "import base64; print('py-ok')"
+    Use terminal to run: curl -sI https://example.com | head -1
+    Use terminal to run: officecli --version
+
+These all pass. Anything referring to `ffmpeg`, `edge-tts`, `rclone`,
+`playwright`, `node`, `hermes` will return `command not found` (exit 127).

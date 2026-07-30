@@ -689,6 +689,8 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 已在 woow-k3s 生產叢集驗證：快樂路徑 6/6 + 邊緣 10/10 = **16/16 全通過**（詳見 [CHANGELOG.md](CHANGELOG.md) [0.16.2]）。
 
+**哪個對話介面可以真的跑這條 pipeline？** 只有 **Dashboard TUI（Port 9119 · `https://<dashboard-host>/chat` · xterm.js 的 `hermes chat` REPL）**。它跑在 **hermes-agent** 容器內，有 ffmpeg/edge-tts/rclone/playwright。**WebUI 對話（Port 8787）** 跑在 **hermes-webui** 容器 —— 那個 image 只有 `python3+pip+curl+officecli`，video pipeline 用到的 binary 都會回 `command not found` (exit 127)。詳見 [docs/troubleshooting.md §5](docs/troubleshooting.md) 完整容器對工具矩陣 + T1/T2 實測證據。`tests/video-tui-t2-pipeline.sh` 是「一行呼叫」參考範本（agent 只需 `bash /opt/data/t2_full_pipeline.sh` 就跑完整條）。
+
 完整測試文件：
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — 測試需求
 - [tests/TEST-REPORT-enterprise.md](tests/TEST-REPORT-enterprise.md) — 測試結果

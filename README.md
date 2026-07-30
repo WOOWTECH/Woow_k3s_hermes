@@ -741,6 +741,8 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 Both were verified on the woow-k3s live cluster: 6/6 happy stages + 10/10 edges = **16/16 pass** (see [CHANGELOG.md](CHANGELOG.md) [0.16.2]).
 
+**Which chat surface can run the pipeline?** Only the **Dashboard TUI on port 9119** (`https://<dashboard-host>/chat` — xterm.js REPL of `hermes chat`). It runs inside the **hermes-agent** container which has ffmpeg/edge-tts/rclone/playwright. The **WebUI chat on port 8787** runs inside **hermes-webui** container — that image only has `python3+pip+curl+officecli`, so it will return `command not found` for the video-pipeline binaries. See [docs/troubleshooting.md §5](docs/troubleshooting.md) for the full container-vs-tool matrix and verified T1/T2 evidence. `tests/video-tui-t2-pipeline.sh` is the reference "one-line-invoke" fixture (agent runs `bash /opt/data/t2_full_pipeline.sh` after `kubectl cp`).
+
 Full test documentation:
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — Test requirements
 - [tests/TEST-REPORT-enterprise.md](tests/TEST-REPORT-enterprise.md) — Test results

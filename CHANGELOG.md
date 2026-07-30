@@ -2,6 +2,35 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [0.16.4] - 2026-07-30
+
+### Added
+- `tests/video-tui-t2-pipeline.sh` — reference "single-agent-invoke" pipeline
+  script. After `kubectl cp` into the pod's `/opt/data/`, an agent turn as
+  short as `bash /opt/data/t2_full_pipeline.sh` produces a full 2-slide narrated
+  MP4. Verified: 12.4s wall time, 960×540 7.099s h264+aac 426349-byte output,
+  one agent Terminal tool call, ~20k of 196k context (10%).
+
+### Documentation
+- `docs/troubleshooting.md` gains a new §5 "Which chat surface can invoke
+  ffmpeg / edge-tts / rclone / playwright?" documenting the critical
+  Dashboard-TUI-vs-WebUI-chat container split. Contains a full container-vs-
+  tool matrix and verified T1/T2 evidence from the woow-k3s live cluster.
+  Practical guidance: video-pipeline / heavy-CLI work → Dashboard TUI or
+  `hermes cron`, NOT WebUI chat.
+- README.md + README_zh-TW.md `Video Pipeline E2E Tests` / `影片 Pipeline
+  E2E 測試` subsections both gain a short paragraph pointing readers to the
+  correct chat surface + the T2 fixture, cross-linked to troubleshooting §5.
+
+### Rationale
+- WebUI chat (port 8787, hermes-webui container) has almost no video tools
+  installed — the image ships `python3+pip+curl+officecli` and not much
+  else. Any prompt saying "run ffmpeg" or "run edge-tts" in WebUI returns
+  exit 127. This was not obvious to operators; codifying it prevents the
+  "why is chat useless for video?" support cycle.
+- Dashboard TUI (port 9119, hermes-agent container) IS the video-capable
+  chat — verified by orchestrating full pipeline in one agent turn.
+
 ## [0.16.3] - 2026-07-30
 
 ### Added
