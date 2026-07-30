@@ -84,7 +84,8 @@ spec:
                 && chmod +x /opt/data/officecli && ln -sf /opt/data/officecli /usr/local/bin/officecli 2>/dev/null || true;
                 [ -x /opt/data/officecli ] && cp -f /opt/data/officecli /shared-tools/officecli 2>/dev/null
                 && chmod +x /shared-tools/officecli 2>/dev/null || true;
-                test -f /opt/data/mcp_patch.py && /opt/hermes/.venv/bin/python3 /opt/data/mcp_patch.py 2>/dev/null || true
+                test -f /opt/data/mcp_patch.py && /opt/hermes/.venv/bin/python3 /opt/data/mcp_patch.py 2>/dev/null || true;
+                test -f /opt/data/install_video_pipeline.sh && bash /opt/data/install_video_pipeline.sh >/opt/data/install_video_pipeline.log 2>&1 || true
         readinessProbe:
           tcpSocket: {port: 8642}
           initialDelaySeconds: 10

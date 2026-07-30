@@ -2,6 +2,38 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [0.16.2] - 2026-07-30
+
+### Added
+- `patches/install_video_pipeline.sh` — idempotent installer for the
+  slide-to-video Pipeline (TTS → Playwright capture → ffmpeg concat/xfade →
+  SRT burn → rclone upload). Auto-runs from hermes-agent postStart if
+  present at `/opt/data/install_video_pipeline.sh`. Fast path (~1s) when
+  everything is already installed; cold path (~2 min) downloads:
+    * `rclone` v1.74.4 into `/opt/data/bin/` (extracted via python zipfile —
+      base image doesn't ship `unzip`)
+    * Playwright's full Chromium 149.x (`chrome-linux64/chrome`, not the
+      pre-existing `chromium_headless_shell-1228` which lacks headed
+      video-record support)
+    * python packages into hermes venv via `uv`: `playwright`, `edge-tts`,
+      `srt`, `pysubs2`
+    * `edge-tts` CLI symlink → `/usr/local/bin/edge-tts` (module was already
+      at `/opt/data/lazy-packages/bin/`, just not on PATH)
+
+  Total footprint ~430 MB — all under `/opt/data`, PVC-persisted, survives
+  pod restarts.
+
+### Notes
+- Base hermes-agent image has no `pip` binary in the venv (uses `uv` for
+  package management). Installer detects this and uses
+  `uv pip install --python /opt/hermes/.venv/bin/python3 ...` instead.
+- Playwright 149.x renamed the Chromium binary path from `chrome-linux/`
+  to `chrome-linux64/`. Installer probes with a glob for future-proofing.
+- rclone Google Drive setup remains a one-time human step:
+    kubectl -n <ns> exec -it <pod> -c hermes-agent -- /opt/data/bin/rclone config
+  Then move `~/.config/rclone/rclone.conf` to `/opt/data/rclone.conf` so it
+  survives pod restarts.
+
 ## [0.16.1] - 2026-07-29
 
 ### Fixed
