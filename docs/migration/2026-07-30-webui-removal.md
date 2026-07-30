@@ -39,6 +39,35 @@ but are not read by the Dashboard — treat them as archive.
 - Removing WebUI saves ~200 MB memory + one container + one Service
   + one ConfigMap + one Secret key + one Cloudflare tunnel route.
 
+## Secret migration: WEBUI_PASSWORD → TTYD_PASSWORD
+
+The `WEBUI_PASSWORD` key in `hermes-secrets` was previously reused by the
+ttyd browser terminal (see `11-terminal.yaml`). Removing WEBUI_PASSWORD
+outright would break ttyd login.
+
+For clusters upgrading through this release, run:
+
+```bash
+NS=<your-namespace>
+# 1. Extract the current WEBUI_PASSWORD value
+PWD=$(kubectl -n $NS get secret hermes-secrets -o jsonpath='{.data.WEBUI_PASSWORD}' | base64 -d)
+
+# 2. Add it as TTYD_PASSWORD (same value — no need to rotate at migration time)
+kubectl -n $NS patch secret hermes-secrets --type=json \
+  -p="[{\"op\":\"add\",\"path\":\"/data/TTYD_PASSWORD\",\"value\":\"$(printf '%s' \"$PWD\" | base64 -w0)\"}]"
+
+# 3. Re-apply the terminal manifest so ttyd picks up TTYD_PASSWORD via secretKeyRef
+kubectl -n $NS apply -f deploy/k3s/manifests/11-terminal.yaml
+
+# 4. Wait for ttyd rollout, verify browser login still works, then remove the old key
+kubectl -n $NS rollout status deploy/hermes-terminal --timeout=120s
+kubectl -n $NS patch secret hermes-secrets --type=json \
+  -p='[{"op":"remove","path":"/data/WEBUI_PASSWORD"}]'
+```
+
+If your deploy script (`deploy-instance.sh`) sets the secret at initial
+deploy time, ensure it sets `TTYD_PASSWORD` on fresh installs.
+
 ## Rollback
 
 The commits that removed WebUI form a coherent series on branch

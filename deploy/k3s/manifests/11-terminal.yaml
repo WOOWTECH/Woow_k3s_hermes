@@ -117,7 +117,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: hermes-secrets
-                  key: WEBUI_PASSWORD
+                  key: TTYD_PASSWORD
                   optional: true
           volumeMounts:
             - name: scripts

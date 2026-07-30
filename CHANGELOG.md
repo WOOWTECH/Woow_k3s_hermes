@@ -43,13 +43,14 @@ repos or branches.
 - `docs/troubleshooting.md` — pruned 226→95 lines; dropped obsolete WebUI-specific §2/§3/§5; kept §1 (dashboard blank page) and §2 (per-tenant MCP) with tenant names genericised
 - `docs/user-manual-zh-TW.md` — tenant table + login URL genericised; chapter walkthroughs retained as historical reference with "example deployment" caveat
 - `docs/api-contract.md`, `CONTRIBUTING.md` — dropped WebUI + branding references
+- `deploy/k3s/manifests/11-terminal.yaml` — ttyd basic-auth now reads `TTYD_PASSWORD` instead of the shared `WEBUI_PASSWORD` key
 
 ### Added
 - `docs/migration/2026-07-30-webui-removal.md` — operator migration guide: what was removed, what replaces it (Dashboard TUI at :9119), why, and how to roll back
 
 ### Preserved (not touched — for rollback)
 - PVC `hermes-webui-data` (name retained; same PVC is mounted by hermes-agent at `/opt/data`, so all prior WebUI sessions/branding icons/OAuth tokens remain accessible)
-- `WEBUI_PASSWORD` key in `hermes-secrets` (retained because `11-terminal.yaml` ttyd basic-auth reuses that key — rename would require external Secret update)
+- `WEBUI_PASSWORD` key in `hermes-secrets` **replaced** by `TTYD_PASSWORD` for ttyd browser terminal — see migration doc for kubectl commands
 - Historical CHANGELOG entries (audit trail)
 - Historical tenant + WebUI files in git history (accessible via `git log --all`)
 
