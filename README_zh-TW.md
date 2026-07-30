@@ -56,7 +56,7 @@
 
 ## 總覽
 
-**WoowTech Hermes Agent** 是基於 [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent) 和 [Hermes WebUI](https://github.com/nesquena/hermes-webui) 打造的企業級自建 AI 助手平台。提供完整的 AI 工作空間：雙圖形介面（Chat WebUI + Dashboard）、47 個預裝 CLI 工具、93 個 AI 技能、多 LLM 支援，可部署於 K3s Kubernetes 或 Podman，並支援自動化白標品牌配置。
+**WoowTech Hermes Agent** 是基於 [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent) 打造的企業級自建 AI 助手平台。提供完整的 AI 工作空間：單一 Dashboard TUI 對話介面（xterm.js 的 `hermes chat` REPL，跑在 agent 容器內）、47 個預裝 CLI 工具、93 個 AI 技能、多 LLM 支援，部署於 K3s Kubernetes、由 Cloudflare Tunnel 自動提供 HTTPS。
 
 ### 為什麼選擇 WoowTech Hermes？
 
@@ -75,7 +75,7 @@
 
 | 功能 | 說明 |
 |------|------|
-| **雙圖形介面** | WebUI (:8787) 對話介面 + Dashboard (:9119) 150+ 設定、Terminal TUI |
+| **Dashboard + TUI 對話** | Dashboard (:9119) 提供 150+ 設定，並在 `/chat` 內建 xterm.js 的 `hermes chat` REPL（跑在 agent 容器內） |
 | **47 個 CLI 工具** | curl, git, jq, yq, rg, fd, gcloud, gh, pandoc, ffmpeg, yt-dlp, nmap 等 |
 | **93 個 AI 技能** | 19 類別：軟體開發、創意設計、MLOps、Odoo ERP、學術研究、媒體 |
 | **多 LLM 支援** | MiniMax M2.7（主要）, GPT-5.x/4.x via OpenRouter, Claude, GLM |
@@ -104,10 +104,9 @@ graph TB
         Tunnel["Cloudflare Tunnel<br/>*.woowtech.io"]
     end
 
-    subgraph Cluster["K3s 叢集 / Podman 主機"]
+    subgraph Cluster["K3s 叢集"]
         subgraph Pod["Hermes Pod"]
-            WebUI["Hermes WebUI<br/>:8787 對話介面"]
-            Agent["Hermes Agent<br/>:8642 Gateway API<br/>:9119 Dashboard"]
+            Agent["Hermes Agent<br/>:8642 Gateway API<br/>:9119 Dashboard + /chat TUI"]
             PG["PostgreSQL 15<br/>:5432"]
             Redis["Redis 7<br/>:6379"]
         end
@@ -126,9 +125,7 @@ graph TB
     end
 
     User -->|HTTPS| Tunnel
-    Tunnel -->|"name-hermes.woowtech.io"| WebUI
     Tunnel -->|"name-dashboard.woowtech.io"| Agent
-    WebUI -->|Gateway API :8642| Agent
     Agent --> PG
     Agent --> Redis
     Agent -->|API| MM
@@ -168,20 +165,20 @@ graph TB
 sequenceDiagram
     participant U as 使用者
     participant CF as Cloudflare Tunnel
-    participant WUI as WebUI :8787
+    participant DASH as Dashboard :9119 (/chat xterm TUI)
     participant GW as Agent Gateway :8642
     participant LLM as MiniMax M2.7
 
     U->>CF: HTTPS 請求
-    CF->>WUI: 路由到 WebUI
-    U->>WUI: 登入（僅密碼）
-    U->>WUI: 發送訊息
-    WUI->>GW: POST /v1/runs {model, input}
+    CF->>DASH: 路由到 Dashboard
+    U->>DASH: 登入（Basic auth）
+    U->>DASH: 在 /chat TUI 發送訊息
+    DASH->>GW: hermes chat → gateway 呼叫
     GW->>GW: _resolve_route(model)
     GW->>LLM: 模型推論
     LLM-->>GW: 串流 tokens
-    GW-->>WUI: SSE 串流
-    WUI-->>U: 渲染對話訊息
+    GW-->>DASH: SSE 串流 → xterm.js 渲染
+    DASH-->>U: 終端機呈現對話訊息
 ```
 
 ### Docker 映像層結構
@@ -218,9 +215,9 @@ graph LR
 
     subgraph Podman["Podman 單節點"]
         direction TB
-        P_POD["Podman Pod（4 容器）"]
+        P_POD["Podman Pod（3 容器）"]
         P_VOL["具名磁碟區"]
-        P_PORT["端口映射<br/>18787 / 19119 / 18642"]
+        P_PORT["端口映射<br/>19119 / 18642"]
         P_POD --> P_VOL
         P_POD --> P_PORT
     end
@@ -232,8 +229,7 @@ graph LR
 
 | 元件 | 映像 | 端口 | 用途 | K8s Manifest |
 |------|------|------|------|-------------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard） | AI 引擎、工具執行、Gateway API、Dashboard + TUI | `06-hermes.yaml` |
-| **Hermes WebUI** | `ghcr.io/nesquena/hermes-webui:latest` | 8787 | 對話介面、技能、記憶、看板、數據分析 | `06-hermes.yaml`（sidecar） |
+| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `06-hermes.yaml` |
 | **瀏覽器終端** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | 瀏覽器 TUI — kubectl exec 進入 hermes-agent shell | `11-terminal.yaml` |
 | **PostgreSQL** | `postgres:15` | 5432 | 資料持久化（對話、記憶、設定） | `04-postgresql.yaml` |
 | **Redis** | `redis:7-alpine` | 6379 | 快取、Session 狀態 | `05-redis.yaml` |
@@ -243,12 +239,11 @@ graph LR
 
 ## 服務 URL
 
-WoowTech Hermes 透過 Cloudflare Tunnel 對外暴露三個服務：
+WoowTech Hermes 透過 Cloudflare Tunnel 對外暴露兩個服務：
 
 | 服務 | URL | 端口 | 用途 |
 |------|-----|------|------|
-| **WebUI**（聊天） | `https://<PREFIX>-hermes.woowtech.io` | 8787 | 主要使用者介面 — 對話、技能、記憶、看板 |
-| **Dashboard**（管理） | `https://<PREFIX>-dashboard.woowtech.io` | 9119 | Agent 管理 — 設定、MCP、模型、日誌、系統 |
+| **Dashboard**（管理 + 對話 TUI） | `https://<PREFIX>-dashboard.woowtech.io` | 9119 | Agent 管理（設定、MCP、模型、日誌、系統）+ `/chat` 內建 xterm.js 的 `hermes chat` REPL |
 | **Terminal**（終端） | `https://<PREFIX>-hermes-terminal.woowtech.io` | 7681 | 瀏覽器 bash shell，直接操作 hermes-agent 容器 |
 
 ---
@@ -396,18 +391,18 @@ cd deploy/k3s
 bash deploy.sh <instance-name>
 ```
 
-依序套用 11 個 K8s manifest：
+依序套用 K8s manifests：
 1. `00-namespace.yaml` — 建立命名空間
 2. `01a-rbac.yaml` — RBAC 權限設定
 3. `02-configmap.yaml` — golden-config.yaml + golden-settings.json
 4. `03-pvc.yaml` — Longhorn 5Gi 持久化磁碟區
 5. `04-postgresql.yaml` — PostgreSQL 15 StatefulSet
 6. `05-redis.yaml` — Redis 7 Deployment
-7. `06-hermes-agent.yaml` — Agent Deployment（Gateway + Dashboard）
-8. `07-hermes-webui.yaml` — WebUI Deployment
-9. `08-cloudflared.yaml` — Cloudflare Tunnel Sidecar
-10. `09-ingress.yaml` — Ingress 規則
-11. `10-network-policy.yaml` — Pod 間網路隔離
+7. `06-hermes.yaml` — Agent Deployment（Gateway + Dashboard + /chat TUI）
+8. `08-cloudflared.yaml` — Cloudflare Tunnel Sidecar
+9. `09-ingress.yaml` — Ingress 規則
+10. `10-network-policy.yaml` — Pod 間網路隔離
+11. `11-terminal.yaml` — ttyd 瀏覽器終端（kubectl exec 到 agent）
 
 ### 黃金配置（`config/golden-config.yaml`）
 
@@ -431,7 +426,7 @@ model_routes:
     model: openai/gpt-5.4-mini
     base_url: https://openrouter.ai/api/v1
     api_key: __OPENROUTER_API_KEY__
-  "@openai-api:gpt-5.4-mini":   # WebUI 選擇器格式
+  "@openai-api:gpt-5.4-mini":   # OpenAI 相容客戶端選擇器格式
     model: openai/gpt-5.4-mini
     base_url: https://openrouter.ai/api/v1
     api_key: __OPENROUTER_API_KEY__
@@ -447,7 +442,7 @@ gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5.3-c
 | `MINIMAX_API_KEY` | 是 | MiniMax M2.7 API 金鑰 |
 | `OPENROUTER_API_KEY` | 是 | OpenRouter API 金鑰（用於 GPT/Claude） |
 | `API_SERVER_KEY` | 是 | Gateway API 認證金鑰 |
-| `WEBUI_PASSWORD` | 是 | WebUI 登入密碼 |
+| `DASHBOARD_PASSWORD` | 是 | Dashboard Basic-auth 密碼 |
 | `CLOUDFLARE_TUNNEL_TOKEN` | K3s 專用 | Cloudflare Tunnel Token |
 | `POSTGRES_PASSWORD` | 是 | PostgreSQL 密碼 |
 
@@ -538,7 +533,7 @@ bash deploy-instance.sh <prefix> <domain>
 
 ## API 參考
 
-Hermes 提供 **46 個已驗證 API 端點**，分佈於兩個服務：
+Hermes 於 Dashboard 服務提供 **28 個已驗證 API 端點**：
 
 ### Dashboard API（端口 9119）— 28 個端點
 
@@ -554,20 +549,6 @@ Hermes 提供 **46 個已驗證 API 端點**，分佈於兩個服務：
 | `/api/model/options` | GET | 可用模型列表 |
 | `/api/analytics/usage` | GET | Token 用量統計 |
 | `/api/logs` | GET | Agent 日誌 |
-
-### WebUI API（端口 8787）— 18 個端點
-
-| 端點 | 方法 | 說明 |
-|------|------|------|
-| `/api/auth/login` | POST | 密碼登入 |
-| `/api/sessions` | GET | 對話列表 |
-| `/api/session/new` | POST | 建立新對話 |
-| `/api/chat/start` | POST | 發送訊息（串流） |
-| `/api/skills` | GET | 技能列表（104 個） |
-| `/api/models` | GET | 可用模型 |
-| `/api/memory` | GET | SOUL.md 內容 |
-| `/api/insights` | GET | 分析資料 |
-| `/api/kanban/boards` | GET | 看板列表 |
 
 完整 API 文件：[docs/api-contract.md](docs/api-contract.md)
 
@@ -585,12 +566,12 @@ bash run-all.sh
 | 輪次 | 焦點 | 測試內容 |
 |------|------|---------|
 | 第 1 輪 | 基礎設施 | Pod 健康、PVC、DNS、端口連通性 |
-| 第 2 輪 | API | 所有 46 個端點驗證 |
+| 第 2 輪 | API | 所有 28 個 Dashboard 端點驗證 |
 | 第 3 輪 | 安全性 | 認證、CORS、速率限制、密鑰遮蔽 |
 | 第 4 輪 | 韌性 | Pod 重啟、PVC 持久化、當機復原 |
-| 第 5 輪 | 整合 | WebUI ↔ Gateway ↔ LLM 端到端 |
+| 第 5 輪 | 整合 | Dashboard TUI ↔ Gateway ↔ LLM 端到端 |
 | 第 6 輪 | LLM 整合 | 模型路由、回應品質、串流 |
-| 第 7 輪 | WebUI 功能 | 對話、技能、記憶、看板、數據分析 |
+| 第 7 輪 | Dashboard 功能 | 對話 TUI、技能、記憶、看板、數據分析 |
 
 ### Playwright E2E 測試
 
@@ -621,7 +602,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 已在 woow-k3s 生產叢集驗證：快樂路徑 6/6 + 邊緣 10/10 = **16/16 全通過**（詳見 [CHANGELOG.md](CHANGELOG.md) [0.16.2]）。
 
-**哪個對話介面可以真的跑這條 pipeline？** 只有 **Dashboard TUI（Port 9119 · `https://<dashboard-host>/chat` · xterm.js 的 `hermes chat` REPL）**。它跑在 **hermes-agent** 容器內，有 ffmpeg/edge-tts/rclone/playwright。**WebUI 對話（Port 8787）** 跑在 **hermes-webui** 容器 —— 那個 image 只有 `python3+pip+curl+officecli`，video pipeline 用到的 binary 都會回 `command not found` (exit 127)。詳見 [docs/troubleshooting.md §5](docs/troubleshooting.md) 完整容器對工具矩陣 + T1/T2 實測證據。`tests/video-tui-t2-pipeline.sh` 是「一行呼叫」參考範本（agent 只需 `bash /opt/data/t2_full_pipeline.sh` 就跑完整條）。
+**pipeline 跑在哪裡？** 全部跑在 **hermes-agent** 容器內，透過 **Dashboard TUI（Port 9119 · `https://<dashboard-host>/chat` · xterm.js 的 `hermes chat` REPL）** 呼叫。這個容器藉由 Dockerfile 與 video-pipeline 安裝腳本已預裝 ffmpeg / edge-tts / rclone / playwright。`tests/video-tui-t2-pipeline.sh` 是「一行呼叫」參考範本（agent 只需 `bash /opt/data/t2_full_pipeline.sh` 就跑完整條）。有關為什麼現在只有一個對話介面，請參閱 [docs/migration/2026-07-30-webui-removal.md](docs/migration/2026-07-30-webui-removal.md)。
 
 完整測試文件：
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — 測試需求
@@ -648,11 +629,11 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 | 問題 | 原因 | 解決方案 |
 |------|------|---------|
-| WebUI 顯示「Connecting...」 | Agent 尚未就緒 | 等待 60 秒讓 s6-overlay 啟動，檢查 `kubectl logs` |
 | Dashboard TUI 空白 | 權限不符 | Dockerfile 第 7 層已修復，重建自訂映像 |
+| Dashboard 頁面載入後空白 | Vite entry-chunk 被改名 | 詳見 `docs/troubleshooting.md §1` — `patches/mcp_patch.py` 已改為原地編輯，不再改名 |
 | 模型回傳 MiniMax 而非 GPT | 缺少 `@openai-api:` 路由 | 執行 `config/fix-model-routes.py` 新增路由 |
 | Cloudflare Tunnel 離線 | Token 過期或 Tunnel 被刪除 | 重新執行 `deploy/k3s/init-cloudflare-hermes.py` |
-| PVC 滿了（5Gi） | 舊對話累積 | 透過 WebUI Settings 封存/刪除舊 Session |
+| PVC 滿了（5Gi） | 舊對話累積 | 透過 Dashboard Settings 封存/刪除舊 Session |
 | Playwright 失敗 | Chromium 未安裝 | 確保使用自訂 Docker 映像（非基礎映像） |
 | `.env` 更新後未同步 | 指紋不符 | 執行 `config/apply-env-fingerprint-patch.py` |
 
@@ -661,7 +642,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 ## 更新日誌
 
 ### v0.15（2026-07）
-- 模型路由修復：新增 `@openai-api:*` 路由以相容 WebUI 選擇器
+- 模型路由修復：新增 `@openai-api:*` 路由以相容 OpenAI 相容客戶端選擇器
 - 同步模型列表（新增 gpt-5.5-pro、gpt-5.4-nano）
 - K3s/Podman `.env` 指紋同步修補
 - Playwright E2E 測試套件（10/10 通過）
@@ -685,7 +666,6 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 - GitHub Issues：[WOOWTECH/Woow_hermes_agent_docker_compose_all/issues](https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all/issues)
 - 上游專案：[Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent)
-- WebUI：[nesquena/hermes-webui](https://github.com/nesquena/hermes-webui)
 - 使用手冊：[docs/user-manual-zh-TW.md](docs/user-manual-zh-TW.md)（25 章完整中文手冊）
 
 **授權**：Proprietary — WOOW Tech 部署與客製化層。上游元件保留各自授權。

@@ -45,15 +45,13 @@
 
 ### 步驟 1：系統網址
 
-Hermes Agent 平台目前部署於 K3s Kubernetes 叢集，透過 Cloudflare Tunnel 提供外部存取。
+Hermes Agent 平台部署於 K3s Kubernetes 叢集，透過 Cloudflare Tunnel 提供外部存取。每個實例對應一個獨立的網址（由部署時的 `<PREFIX>` 決定）。
 
-| 系統 | 網址 | 說明 |
-|------|------|------|
-| WoowTech Hermes | https://woowtech-hermes.woowtech.io | WoowTech Odoo 18 ERP 顧問 |
-| Apporoalan Hermes | https://apporoalan-hermes.woowtech.io | ESG/WELL/LEED 健康建築顧問 |
-| Johhanlin Hermes | https://johhanlin-hermes.woowtech.io | HSBC 外匯顧問 |
-| Alanlin Hermes | https://alanlin-hermes.woowtech.io | 通用 AI 助手 |
-| TorchMedia Hermes | https://torchmedia-hermes.woowtech.io | 通用 AI 助手 |
+| 系統 | 網址格式 | 說明 |
+|------|---------|------|
+| Hermes 實例 | `https://<tenant-hermes>.<your-domain>` | 各自租戶的 AI 助手實例（例如 Odoo 顧問、健康建築顧問、通用助手等） |
+
+> **註**：本手冊的截圖來自某個特定部署（domain 為 `<PREFIX>-hermes.woowtech.io`），僅作為介面操作示意，實際網址依你的部署而定。
 
 ### 步驟 2：預設帳號
 
@@ -112,7 +110,7 @@ Hermes Agent 容器內預裝 **47 個 CLI 工具**，涵蓋 6 大類別：
 
 ### 步驟 1：開啟登入頁面
 
-在瀏覽器輸入 Hermes 網址（例如 `https://woowtech-hermes.woowtech.io`），會自動導向登入頁面。
+在瀏覽器輸入 Hermes 網址（例如 `https://<tenant-hermes>.<your-domain>`），會自動導向登入頁面。
 
 ![登入頁面：輸入密碼後點擊 Sign in](images/ch02_01_login_page.png)
 

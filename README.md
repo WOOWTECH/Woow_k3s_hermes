@@ -59,7 +59,7 @@
 
 ## Overview
 
-**WoowTech Hermes Agent** is an enterprise-grade, self-hosted AI assistant platform built on [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent) and [Hermes WebUI](https://github.com/nesquena/hermes-webui). It provides a complete AI workspace with dual GUI (Chat WebUI + Dashboard), 47 pre-installed CLI tools, 93 AI skills, and multi-LLM support — all deployable on either K3s Kubernetes or Podman with automated white-label branding.
+**WoowTech Hermes Agent** is an enterprise-grade, self-hosted AI assistant platform built on [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent). It provides a complete AI workspace with a single Dashboard TUI chat surface (xterm.js REPL of `hermes chat` inside the agent container), 47 pre-installed CLI tools, 93 AI skills, and multi-LLM support — all deployable on K3s Kubernetes with automated Cloudflare Tunnel HTTPS.
 
 ### Why WoowTech Hermes?
 
@@ -78,7 +78,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Dual GUI** | WebUI (:8787) for chat + Dashboard (:9119) for 150+ settings, Terminal TUI |
+| **Dashboard + TUI Chat** | Dashboard (:9119) with 150+ settings + xterm.js REPL of `hermes chat` at `/chat` running inside the agent container |
 | **47 CLI Tools** | curl, git, jq, yq, rg, fd, gcloud, gh, pandoc, ffmpeg, yt-dlp, nmap, and more |
 | **93 AI Skills** | 19 categories: software-dev, creative, MLOps, Odoo ERP, research, media |
 | **Multi-LLM** | MiniMax M2.7 (primary), GPT-5.x/4.x via OpenRouter, Claude, GLM |
@@ -107,10 +107,9 @@ graph TB
         Tunnel["Cloudflare Tunnel<br/>*.woowtech.io"]
     end
 
-    subgraph Cluster["K3s Cluster / Podman Host"]
+    subgraph Cluster["K3s Cluster"]
         subgraph Pod["Hermes Pod"]
-            WebUI["Hermes WebUI<br/>:8787 Chat Interface"]
-            Agent["Hermes Agent<br/>:8642 Gateway API<br/>:9119 Dashboard"]
+            Agent["Hermes Agent<br/>:8642 Gateway API<br/>:9119 Dashboard + /chat TUI"]
             PG["PostgreSQL 15<br/>:5432"]
             Redis["Redis 7<br/>:6379"]
         end
@@ -129,9 +128,7 @@ graph TB
     end
 
     User -->|HTTPS| Tunnel
-    Tunnel -->|"name-hermes.woowtech.io"| WebUI
     Tunnel -->|"name-dashboard.woowtech.io"| Agent
-    WebUI -->|Gateway API :8642| Agent
     Agent --> PG
     Agent --> Redis
     Agent -->|API| MM
@@ -171,20 +168,20 @@ graph TB
 sequenceDiagram
     participant U as User
     participant CF as Cloudflare Tunnel
-    participant WUI as WebUI :8787
+    participant DASH as Dashboard :9119 (/chat xterm TUI)
     participant GW as Agent Gateway :8642
     participant LLM as MiniMax M2.7
 
     U->>CF: HTTPS request
-    CF->>WUI: Route to WebUI
-    U->>WUI: Login (password only)
-    U->>WUI: Send message
-    WUI->>GW: POST /v1/runs {model, input}
+    CF->>DASH: Route to Dashboard
+    U->>DASH: Login (Basic auth)
+    U->>DASH: Send message in /chat TUI
+    DASH->>GW: hermes chat → gateway call
     GW->>GW: _resolve_route(model)
     GW->>LLM: Model inference
     LLM-->>GW: Streamed tokens
-    GW-->>WUI: SSE stream
-    WUI-->>U: Rendered chat message
+    GW-->>DASH: SSE stream → xterm.js render
+    DASH-->>U: Terminal-rendered chat message
 ```
 
 ### Docker Image Layers
@@ -221,9 +218,9 @@ graph LR
 
     subgraph Podman["Podman Single-Node"]
         direction TB
-        P_POD["Podman Pod (4 containers)"]
+        P_POD["Podman Pod (3 containers)"]
         P_VOL["Named Volumes"]
-        P_PORT["Port Mapping<br/>18787 / 19119 / 18642"]
+        P_PORT["Port Mapping<br/>19119 / 18642"]
         P_POD --> P_VOL
         P_POD --> P_PORT
     end
@@ -235,8 +232,7 @@ graph LR
 
 | Component | Image | Port | Purpose | K8s Manifest |
 |-----------|-------|------|---------|-------------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642 (Gateway), 9119 (Dashboard) | AI engine, tool execution, Gateway API, Dashboard with TUI | `06-hermes.yaml` |
-| **Hermes WebUI** | `ghcr.io/nesquena/hermes-webui:latest` | 8787 | Chat interface, Skills, Memory, Kanban, Insights | `06-hermes.yaml` (sidecar) |
+| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642 (Gateway), 9119 (Dashboard + /chat TUI) | AI engine, tool execution, Gateway API, Dashboard with xterm.js chat TUI | `06-hermes.yaml` |
 | **Browser Terminal** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | Browser-based TUI — kubectl exec into hermes-agent shell | `11-terminal.yaml` |
 | **PostgreSQL** | `postgres:15` | 5432 | Data persistence (conversations, memory, settings) | `04-postgresql.yaml` |
 | **Redis** | `redis:7-alpine` | 6379 | Cache, session state | `05-redis.yaml` |
@@ -250,10 +246,10 @@ deploy/k3s/manifests/
 ├── 01-secrets.yaml            # Secrets template (CF + app secrets)
 ├── 01a-rbac.yaml              # ServiceAccount + RBAC (cluster-reader + ns-writer)
 ├── 02-configmap.yaml          # Configuration (domain, ports, DB, Redis)
-├── 03-pvc.yaml                # Persistent volumes (agent, webui, postgres, redis)
+├── 03-pvc.yaml                # Persistent volumes (agent, postgres, redis)
 ├── 04-postgresql.yaml         # PostgreSQL 15 deployment + service
 ├── 05-redis.yaml              # Redis 7 deployment + service
-├── 06-hermes.yaml             # Hermes Agent + WebUI sidecar deployment + services
+├── 06-hermes.yaml             # Hermes Agent deployment + service
 ├── 08-cloudflared.yaml        # Cloudflare Tunnel deployment
 ├── 09-ingress.yaml            # Traefik ingress routing
 ├── 10-network-policy.yaml     # Network policies (DB + Redis access control)
@@ -264,16 +260,14 @@ deploy/k3s/manifests/
 
 ## Service URLs
 
-The WoowTech Hermes deployment exposes three services via Cloudflare Tunnel:
+The WoowTech Hermes deployment exposes two services via Cloudflare Tunnel:
 
 | Service | URL | Port | Purpose |
 |---------|-----|------|---------|
-| **WebUI** (Chat) | `https://<PREFIX>-hermes.woowtech.io` | 8787 | Primary user interface — chat, skills, memory, kanban |
-| **Dashboard** (Admin) | `https://<PREFIX>-dashboard.woowtech.io` | 9119 | Agent management — config, MCP, models, logs, system |
+| **Dashboard** (Admin + Chat TUI) | `https://<PREFIX>-dashboard.woowtech.io` | 9119 | Agent management (config, MCP, models, logs, system) + xterm.js `hermes chat` REPL at `/chat` |
 | **Terminal** (TUI) | `https://<PREFIX>-hermes-terminal.woowtech.io` | 7681 | Browser-based bash shell into hermes-agent container |
 
 All services are protected by authentication:
-- WebUI: Password login
 - Dashboard: Username/Password (Basic provider)
 - Terminal: HTTP Basic Auth (admin / configured password)
 
@@ -443,18 +437,18 @@ cd deploy/k3s
 bash deploy.sh <instance-name>
 ```
 
-11 K8s manifests are applied in order:
+Manifests are applied in order:
 1. `00-namespace.yaml` — Namespace creation
 2. `01a-rbac.yaml` — RBAC for hermes user
 3. `02-configmap.yaml` — golden-config.yaml + golden-settings.json
 4. `03-pvc.yaml` — Longhorn 5Gi persistent volume
 5. `04-postgresql.yaml` — PostgreSQL 15 StatefulSet
 6. `05-redis.yaml` — Redis 7 Deployment
-7. `06-hermes-agent.yaml` — Agent Deployment (Gateway + Dashboard)
-8. `07-hermes-webui.yaml` — WebUI Deployment
-9. `08-cloudflared.yaml` — Cloudflare Tunnel sidecar
-10. `09-ingress.yaml` — Ingress rules
-11. `10-network-policy.yaml` — Pod-to-pod network isolation
+7. `06-hermes.yaml` — Agent Deployment (Gateway + Dashboard + /chat TUI)
+8. `08-cloudflared.yaml` — Cloudflare Tunnel sidecar
+9. `09-ingress.yaml` — Ingress rules
+10. `10-network-policy.yaml` — Pod-to-pod network isolation
+11. `11-terminal.yaml` — ttyd browser terminal (kubectl exec into agent)
 
 ### Golden Configuration (`config/golden-config.yaml`)
 
@@ -478,7 +472,7 @@ model_routes:
     model: openai/gpt-5.4-mini
     base_url: https://openrouter.ai/api/v1
     api_key: __OPENROUTER_API_KEY__
-  "@openai-api:gpt-5.4-mini":   # WebUI picker format
+  "@openai-api:gpt-5.4-mini":   # OpenAI-compatible client format
     model: openai/gpt-5.4-mini
     base_url: https://openrouter.ai/api/v1
     api_key: __OPENROUTER_API_KEY__
@@ -487,10 +481,6 @@ model_routes:
 **Supported models** (11 models x 2 prefixes = 22 routes):
 gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5.3-codex, gpt-5.2-codex, gpt-4.1, gpt-4o, gpt-4o-mini
 
-### WebUI Settings (`config/golden-settings.json`)
-
-Controls WebUI appearance and behavior: chat layout, sidebar visibility, default model, theme.
-
 ### Environment Variables
 
 | Variable | Required | Description |
@@ -498,7 +488,7 @@ Controls WebUI appearance and behavior: chat layout, sidebar visibility, default
 | `MINIMAX_API_KEY` | Yes | MiniMax M2.7 API key |
 | `OPENROUTER_API_KEY` | Yes | OpenRouter API key for GPT/Claude models |
 | `API_SERVER_KEY` | Yes | Gateway API authentication key |
-| `WEBUI_PASSWORD` | Yes | WebUI login password |
+| `DASHBOARD_PASSWORD` | Yes | Dashboard Basic-auth password |
 | `CLOUDFLARE_TUNNEL_TOKEN` | K3s only | Cloudflare Tunnel token |
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
 
@@ -589,7 +579,7 @@ The custom Docker image includes **47 CLI tools** across 6 categories:
 
 ## API Reference
 
-Hermes exposes **46 verified API endpoints** across two services:
+Hermes exposes **28 verified API endpoints** on the Dashboard service:
 
 ### Dashboard API (port 9119) — 28 endpoints
 
@@ -605,20 +595,6 @@ Hermes exposes **46 verified API endpoints** across two services:
 | `/api/model/options` | GET | Available models |
 | `/api/analytics/usage` | GET | Token usage stats |
 | `/api/logs` | GET | Agent logs |
-
-### WebUI API (port 8787) — 18 endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/login` | POST | Password login |
-| `/api/sessions` | GET | Conversation list |
-| `/api/session/new` | POST | Create new chat |
-| `/api/chat/start` | POST | Send message (streaming) |
-| `/api/skills` | GET | Skill list (104 skills) |
-| `/api/models` | GET | Available models |
-| `/api/memory` | GET | SOUL.md content |
-| `/api/insights` | GET | Analytics data |
-| `/api/kanban/boards` | GET | Kanban boards |
 
 Full API documentation: [docs/api-contract.md](docs/api-contract.md)
 
@@ -636,12 +612,12 @@ bash run-all.sh
 | Round | Focus | Tests |
 |-------|-------|-------|
 | Round 1 | Infrastructure | Pod health, PVC, DNS, port connectivity |
-| Round 2 | API | All 46 endpoints validated |
+| Round 2 | API | All 28 dashboard endpoints validated |
 | Round 3 | Security | Auth, CORS, rate limiting, secret redaction |
 | Round 4 | Resilience | Pod restart, PVC persistence, crash recovery |
-| Round 5 | Integration | WebUI ↔ Gateway ↔ LLM end-to-end |
+| Round 5 | Integration | Dashboard TUI ↔ Gateway ↔ LLM end-to-end |
 | Round 6 | LLM Integration | Model routing, response quality, streaming |
-| Round 7 | WebUI Features | Chat, skills, memory, kanban, insights |
+| Round 7 | Dashboard Features | Chat TUI, skills, memory, kanban, insights |
 
 ### Playwright E2E Tests
 
@@ -673,7 +649,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 Both were verified on the woow-k3s live cluster: 6/6 happy stages + 10/10 edges = **16/16 pass** (see [CHANGELOG.md](CHANGELOG.md) [0.16.2]).
 
-**Which chat surface can run the pipeline?** Only the **Dashboard TUI on port 9119** (`https://<dashboard-host>/chat` — xterm.js REPL of `hermes chat`). It runs inside the **hermes-agent** container which has ffmpeg/edge-tts/rclone/playwright. The **WebUI chat on port 8787** runs inside **hermes-webui** container — that image only has `python3+pip+curl+officecli`, so it will return `command not found` for the video-pipeline binaries. See [docs/troubleshooting.md §5](docs/troubleshooting.md) for the full container-vs-tool matrix and verified T1/T2 evidence. `tests/video-tui-t2-pipeline.sh` is the reference "one-line-invoke" fixture (agent runs `bash /opt/data/t2_full_pipeline.sh` after `kubectl cp`).
+**Where the pipeline runs.** Everything runs inside the **hermes-agent** container via the **Dashboard TUI on port 9119** (`https://<dashboard-host>/chat` — xterm.js REPL of `hermes chat`). That container has ffmpeg / edge-tts / rclone / playwright pre-installed via the Dockerfile + the video-pipeline installer. `tests/video-tui-t2-pipeline.sh` is the reference "one-line-invoke" fixture (agent runs `bash /opt/data/t2_full_pipeline.sh` after `kubectl cp`). See [docs/migration/2026-07-30-webui-removal.md](docs/migration/2026-07-30-webui-removal.md) for context on why there is only one chat surface now.
 
 Full test documentation:
 - [tests/PRD-hermes-enterprise-test.md](tests/PRD-hermes-enterprise-test.md) — Test requirements
@@ -700,11 +676,11 @@ Full test documentation:
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| WebUI shows "Connecting..." | Agent not ready yet | Wait 60s for s6-overlay boot, check `kubectl logs` |
 | Dashboard TUI blank | Permission mismatch | Dockerfile Layer 7 fixes this; rebuild custom image |
+| Dashboard renders blank page after load | Vite entry-chunk rename | See `docs/troubleshooting.md §1` — patched by `patches/mcp_patch.py` (in-place edit, not rename) |
 | Model returns MiniMax instead of GPT | Missing `@openai-api:` route | Run `config/fix-model-routes.py` to add routes |
 | Cloudflare Tunnel offline | Token expired or tunnel deleted | Re-run `deploy/k3s/init-cloudflare-hermes.py` |
-| PVC full (5Gi) | Old conversations accumulate | Archive/delete old sessions via WebUI Settings |
+| PVC full (5Gi) | Old conversations accumulate | Archive/delete old sessions via Dashboard Settings |
 | Playwright fails | Chromium not installed | Ensure custom Docker image is used (not base image) |
 | `.env` not syncing after update | Fingerprint mismatch | Run `config/apply-env-fingerprint-patch.py` |
 
@@ -713,8 +689,8 @@ Full test documentation:
 ## Changelog
 
 ### v0.15 (2026-07)
-- Model routing fix: added `@openai-api:*` routes for WebUI picker compatibility
-- Synced model list with WebUI picker (added gpt-5.5-pro, gpt-5.4-nano)
+- Model routing fix: added `@openai-api:*` routes for OpenAI-compatible client picker
+- Synced model list (added gpt-5.5-pro, gpt-5.4-nano)
 - .env fingerprint sync patch for K3s/Podman
 - Playwright-based E2E test suite (10/10 pass)
 
@@ -737,6 +713,5 @@ Full test documentation:
 
 - GitHub Issues: [WOOWTECH/Woow_hermes_agent_docker_compose_all/issues](https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all/issues)
 - Upstream: [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent)
-- WebUI: [nesquena/hermes-webui](https://github.com/nesquena/hermes-webui)
 
 **License**: Proprietary — WOOW Tech deployment and customization layer. Upstream components retain their respective licenses.
