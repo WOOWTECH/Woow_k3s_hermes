@@ -2,6 +2,44 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [0.16.1] - 2026-07-29
+
+### Fixed
+- **WebUI chat blocked by upstream `dict.model_dump()` AttributeError** when
+  MiniMax (any variant) or other providers stream `type: "thinking"` content
+  with tool_use loaded. Root cause: `HERMES_WEBUI_CHAT_BACKEND=gateway`
+  routes through a hermes-gateway serialization path that assumes pydantic
+  models. Template `06-hermes.yaml` now leaves this env unset (falls back to
+  WebUI's default in-process runtime, per upstream WebUI docs). CLI
+  invocations (`hermes -z ...`) were unaffected all along — only the
+  gateway-backed WebUI path triggered it.
+- **`officecli: command not found` inside hermes-webui container.** Two
+  compounding bugs: (a) webui login-shell profile strips `/opt/shared-tools`
+  from PATH, so the shared officecli was invisible to `bash -lc`
+  invocations; (b) webui image lacks libicu, causing officecli (a .NET
+  binary) to abort on startup. Template now (i) copies officecli from PVC
+  into `/shared-tools` in the agent postStart, (ii) symlinks
+  `/opt/shared-tools/officecli -> /usr/local/bin/officecli` in the webui
+  startup script (always in PATH regardless of shell mode), and (iii) sets
+  `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true` on the webui container to
+  bypass the ICU requirement.
+
+### Added
+- `docs/troubleshooting.md` — field notes on the four biggest deployment
+  gotchas: blank dashboard, WebUI chat AttributeError, officecli PATH,
+  and per-tenant MCP server config (HA / n8n endpoints, OAuth login flow
+  with the persistent-stdin fifo trick).
+- Agent postStart now auto-runs `/opt/data/mcp_patch.py` (from [0.16.0]) if
+  present — no manual re-run needed after pod restarts. Copy the script to
+  the PVC once with `kubectl cp` and future pods self-patch.
+
+### Notes
+- HA MCP endpoint pattern: `https://<host>/private_<token>` — no `/mcp` or
+  `/sse` suffix (server autonegotiates protocol on the base URL).
+- n8n-mcp endpoint pattern: `https://<host>/private_<token>/mcp` (HTTP
+  JSON-RPC). Do NOT use `/sse` — that endpoint only accepts GET for
+  streaming, and `hermes mcp add` will report `Session terminated`.
+
 ## [0.16.0] - 2026-07-29
 
 ### Fixed

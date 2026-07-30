@@ -81,7 +81,10 @@ spec:
                 SITE=$(/opt/hermes/.venv/bin/python3 -c "import site;print(site.getsitepackages()[0])" 2>/dev/null)
                 && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true;
                 curl -sfL -o /opt/data/officecli "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.135/officecli-linux-x64" 2>/dev/null
-                && chmod +x /opt/data/officecli && ln -sf /opt/data/officecli /usr/local/bin/officecli 2>/dev/null || true
+                && chmod +x /opt/data/officecli && ln -sf /opt/data/officecli /usr/local/bin/officecli 2>/dev/null || true;
+                [ -x /opt/data/officecli ] && cp -f /opt/data/officecli /shared-tools/officecli 2>/dev/null
+                && chmod +x /shared-tools/officecli 2>/dev/null || true;
+                test -f /opt/data/mcp_patch.py && /opt/hermes/.venv/bin/python3 /opt/data/mcp_patch.py 2>/dev/null || true
         readinessProbe:
           tcpSocket: {port: 8642}
           initialDelaySeconds: 10
@@ -126,6 +129,10 @@ spec:
 
           rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
 
+          # officecli: symlink from tools-shared (populated by hermes-agent postStart)
+          # into /usr/local/bin so login shells also find it — see docs/troubleshooting.md
+          [ -x /opt/shared-tools/officecli ] && ln -sf /opt/shared-tools/officecli /usr/local/bin/officecli 2>/dev/null || true
+
           if [ -f /hermeswebui_init.bash ]; then
             sed -i 's/chmod 700 "$itdir"/chmod 755 "$itdir"/' /hermeswebui_init.bash 2>/dev/null
             sed -i '/cd \/app; python server.py/i test -f /home/hermeswebui/.hermes/replace_icons.sh \&\& sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true' /hermeswebui_init.bash 2>/dev/null
@@ -135,7 +142,12 @@ spec:
             sleep infinity
           fi
         env:
-        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
+        # HERMES_WEBUI_CHAT_BACKEND: leave UNSET to use the in-process legacy
+        # runtime (WebUI default). Setting it to `gateway` triggers the hermes
+        # gateway path which currently hits an upstream `dict.model_dump()`
+        # AttributeError when MiniMax (or any provider returning `type: thinking`
+        # content) is invoked with tool_use loaded. See docs/troubleshooting.md.
+        # - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
         - name: HERMES_WEBUI_GATEWAY_API_KEY
           valueFrom:
             secretKeyRef:
@@ -159,6 +171,9 @@ spec:
         - {name: HERMES_WEBUI_PASSWORD, value: "__WEBUI_PASSWORD__"}
         - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "__DASHBOARD_USERNAME__"}
         - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: "__DASHBOARD_PASSWORD__"}
+        # Officecli is a .NET binary; without ICU package (bundled image doesn't
+        # ship it) it fails at startup unless invariant globalization is on.
+        - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
         tty: true
         ports:
         - {containerPort: 8787, name: http, protocol: TCP}
