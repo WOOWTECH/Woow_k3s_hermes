@@ -3,7 +3,7 @@
 # Restrict database/cache access to hermes pods only
 # =============================================================
 
-# PostgreSQL: only hermes-agent and hermes-webui can connect
+# PostgreSQL: only hermes-agent can connect
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -22,14 +22,11 @@ spec:
         - podSelector:
             matchLabels:
               app: hermes-agent
-        - podSelector:
-            matchLabels:
-              app: hermes-webui
       ports:
         - protocol: TCP
           port: 5432
 ---
-# Redis: only hermes-agent and hermes-webui can connect
+# Redis: only hermes-agent can connect
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -48,9 +45,6 @@ spec:
         - podSelector:
             matchLabels:
               app: hermes-agent
-        - podSelector:
-            matchLabels:
-              app: hermes-webui
       ports:
         - protocol: TCP
           port: 6379
