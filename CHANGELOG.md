@@ -2,6 +2,67 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [0.17.0] - 2026-07-30 — BREAKING: single-container architecture
+
+### Removed
+- **`hermes-webui` sidecar container** (`ghcr.io/nesquena/hermes-webui:latest`, port 8787) and everything wired to it:
+  - `hermes-webui-svc` Service
+  - `webui-oauth-patch` ConfigMap content and mount
+  - `/` ingress path (kept `/api` → agent gateway)
+  - NetworkPolicy `hermes-webui` podSelectors from postgres/redis rules
+  - CF tunnel route for the `hermes-` (webui) hostname is deleted separately from Cloudflare dashboard — see [docs/migration/2026-07-30-webui-removal.md](docs/migration/2026-07-30-webui-removal.md)
+
+### Removed (de-tenant)
+- `instances/` directory (per-tenant overrides for prior tenants preserved in git history)
+- `instances/instances.json`
+- `deploy/k3s/deploy-apporo-team.sh` (tenant-specific)
+- `branding/` (both `apporo/` and `woowtech/`) — the `apply_branding_*.py`
+  scripts patched WebUI internals (`/app/static/index.html`,
+  `/app/api/routes.py`) which are gone with the WebUI image
+- `deploy/k3s/init-cloudflare-hermes.py` (WebUI-tunnel-only; replaced by dashboard-focused route creation in `deploy.sh`)
+- `config/deploy-and-test.sh`, `config/post-deploy-setup.sh` (2-container assumptions)
+- `tests/round6-llm-integration.sh`, `tests/round7-webui-features.sh`,
+  `tests/test-instance.sh`, `tests/run-dual-instance-e2e.sh`,
+  `tests/playwright/hermes-webui.spec.mjs`,
+  `tests/playwright/hermes-webui-features.spec.mjs`
+  (WebUI feature suites + tenant-dependent E2E)
+- `scripts/strip_webui.py` (one-shot migration helper)
+
+Repo is now a generic template. Tenants own their overrides in their own
+repos or branches.
+
+### Changed
+- `deploy/k3s/manifests/06-hermes.yaml` — one container (hermes-agent), one Service (hermes-agent-svc)
+- `deploy/k3s/manifests/09-ingress.yaml` — `/` path removed; `/api` retained → `hermes-agent-svc:8642`
+- `deploy/k3s/manifests/10-network-policy.yaml` — `hermes-webui` podSelectors removed
+- `deploy/k3s/manifests/02-configmap.yaml` — `HERMES_WEBUI_PORT` key removed
+- `deploy/k3s/deploy.sh` — dropped `07-hermes-webui.yaml` from apply loop; CF tunnel route created against dashboard (`hermes-agent-svc:9119`) instead of WebUI
+- `deploy/k3s/deploy-instance.sh` — dropped WEBUI_IMAGE / port / password / state-dir vars, generic `<tenant>` placeholder
+- `tests/round1-infra.sh`, `round2-api.sh`, `round4-resilience.sh`, `round5-integration.sh`, `tests/lib/assert.sh`, `tests/run-all.sh` — WebUI test paths removed; agent-only paths retained
+- `README.md`, `README_zh-TW.md` — Dual-GUI claim retired; Dashboard TUI is now the sole chat surface; architecture/mermaid/tables/service-URLs updated accordingly
+- `docs/troubleshooting.md` — pruned 226→95 lines; dropped obsolete WebUI-specific §2/§3/§5; kept §1 (dashboard blank page) and §2 (per-tenant MCP) with tenant names genericised
+- `docs/user-manual-zh-TW.md` — tenant table + login URL genericised; chapter walkthroughs retained as historical reference with "example deployment" caveat
+- `docs/api-contract.md`, `CONTRIBUTING.md` — dropped WebUI + branding references
+
+### Added
+- `docs/migration/2026-07-30-webui-removal.md` — operator migration guide: what was removed, what replaces it (Dashboard TUI at :9119), why, and how to roll back
+
+### Preserved (not touched — for rollback)
+- PVC `hermes-webui-data` (name retained; same PVC is mounted by hermes-agent at `/opt/data`, so all prior WebUI sessions/branding icons/OAuth tokens remain accessible)
+- `WEBUI_PASSWORD` key in `hermes-secrets` (retained because `11-terminal.yaml` ttyd basic-auth reuses that key — rename would require external Secret update)
+- Historical CHANGELOG entries (audit trail)
+- Historical tenant + WebUI files in git history (accessible via `git log --all`)
+
+### Migration
+See [docs/migration/2026-07-30-webui-removal.md](docs/migration/2026-07-30-webui-removal.md).
+The Dashboard TUI on port 9119 (`https://<dashboard-host>/chat` — xterm.js REPL of `hermes chat`) replaces the WebUI chat surface entirely. It runs inside the hermes-agent container which has ffmpeg, edge-tts, rclone, playwright, and all 61 hermes CLI subcommands — versus WebUI which could only invoke `python3+pip+curl+officecli`.
+
+### Rationale
+- WebUI's gateway backend hit an upstream `dict.model_dump()` AttributeError on MiniMax tool_use responses (documented in the git history of [0.16.1]).
+- WebUI image doesn't ship the CLI tools most real workflows need (documented in the [0.16.4] container-vs-tool matrix).
+- Single-container reduces memory by ~200 MB and eliminates the "which chat should I use?" question.
+- Dashboard TUI end-to-end verified via T1/T2 pipeline tests ([0.16.4]).
+
 ## [0.16.4] - 2026-07-30
 
 ### Added
