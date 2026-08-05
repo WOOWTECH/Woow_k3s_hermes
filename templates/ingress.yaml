@@ -1,0 +1,23 @@
+{{- if .Values.cloudflare.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hermes-ingress
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app.kubernetes.io/part-of: hermes
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.cloudflare.ingress.className }}
+spec:
+  rules:
+    - host: {{ .Values.cloudflare.domain }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: hermes-agent-svc
+                port:
+                  number: {{ .Values.hermes.service.gatewayPort }}
+{{- end }}

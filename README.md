@@ -18,15 +18,12 @@
     <a href="README.md">English</a> |
     <a href="README_zh-TW.md">繁體中文</a>
   </p>
-
-  <p>
-    <code>main</code> · <strong><code>k3s</code></strong> · <a href="../../tree/podman"><code>podman</code></a>
-  </p>
 </div>
 
-> **This is the `k3s` branch** — contains Kubernetes deployment manifests, scripts, and configuration.<br/>
-> Looking for Podman? Switch to the [`podman` branch](../../tree/podman).<br/>
-> Looking for an overview? See the [`main` branch](../../tree/main).
+> [!IMPORTANT]
+> **This repository packages the Hermes Agent as a Helm chart for K3s / Kubernetes.**
+>
+> For single-node Podman deployment, see the sibling repository: [**WOOWTECH/Woow_podman_hermes**](https://github.com/WOOWTECH/Woow_podman_hermes).
 
 ---
 
@@ -40,9 +37,7 @@
 - [MCP Integration](#mcp-integration)
 - [Browser Terminal (ttyd)](#browser-terminal-ttyd)
 - [Screenshots](#screenshots)
-- [Deployment Options](#deployment-options)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
+- [Deployment](#deployment)
 - [Custom Docker Image](#custom-docker-image)
 - [Multi-Instance Deployment](#multi-instance-deployment)
 - [White-Label Branding](#white-label-branding)
@@ -69,7 +64,7 @@
 | One-size-fits-all AI assistants | **93 domain skills** including Odoo 18 ERP, ESG/WELL/LEED, finance |
 | Single-model lock-in | **Multi-LLM**: MiniMax M2.7 primary + OpenAI/Claude/GLM via OpenRouter |
 | No browser automation | **Playwright + Chromium 148** built into the agent container |
-| Complex Kubernetes setup | **One-command deployment** with `deploy.sh` + golden configs |
+| Complex Kubernetes setup | **One-command deployment** with `helm install` + golden configs |
 | Single-tenant only | **Multi-instance** with namespace isolation + per-tenant branding |
 
 ---
@@ -200,60 +195,60 @@ graph BT
     BASE --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
 ```
 
-### Deployment Comparison
+### K3s Resource Overview
 
 ```mermaid
 graph LR
-    subgraph K3s["K3s Kubernetes"]
+    subgraph K3s["K3s / Kubernetes (Helm chart)"]
         direction TB
         K_NS["Namespace per Instance"]
-        K_DEP["Deployment + Service"]
+        K_DEP["Hermes Deployment + Service"]
         K_PVC["Longhorn PVC 5Gi"]
-        K_CF["Cloudflare Tunnel Sidecar"]
+        K_CF["Cloudflare Tunnel Deployment"]
         K_ING["Ingress + NetworkPolicy"]
+        K_CRON["Nightly disk-cleanup CronJob"]
         K_NS --> K_DEP --> K_PVC
         K_DEP --> K_CF
         K_DEP --> K_ING
-    end
-
-    subgraph Podman["Podman Single-Node"]
-        direction TB
-        P_POD["Podman Pod (3 containers)"]
-        P_VOL["Named Volumes"]
-        P_PORT["Port Mapping<br/>19119 / 18642"]
-        P_POD --> P_VOL
-        P_POD --> P_PORT
+        K_NS --> K_CRON
     end
 ```
+
+> Podman single-node deployment lives in the sibling repository [WOOWTECH/Woow_podman_hermes](https://github.com/WOOWTECH/Woow_podman_hermes).
 
 ---
 
 ## System Components
 
-| Component | Image | Port | Purpose | K8s Manifest |
-|-----------|-------|------|---------|-------------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642 (Gateway), 9119 (Dashboard + /chat TUI) | AI engine, tool execution, Gateway API, Dashboard with xterm.js chat TUI | `06-hermes.yaml` |
-| **Browser Terminal** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | Browser-based TUI — kubectl exec into hermes-agent shell | `11-terminal.yaml` |
-| **PostgreSQL** | `postgres:15` | 5432 | Data persistence (conversations, memory, settings) | `04-postgresql.yaml` |
-| **Redis** | `redis:7-alpine` | 6379 | Cache, session state | `05-redis.yaml` |
-| **Cloudflared** | `cloudflare/cloudflared:latest` | — | Cloudflare Tunnel for HTTPS access | `08-cloudflared.yaml` |
+| Component | Image | Port | Purpose | Chart Template |
+|-----------|-------|------|---------|----------------|
+| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642 (Gateway), 9119 (Dashboard + /chat TUI) | AI engine, tool execution, Gateway API, Dashboard with xterm.js chat TUI | `templates/hermes-deployment.yaml` |
+| **Browser Terminal** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | Browser-based TUI — kubectl exec into hermes-agent shell | `templates/terminal.yaml` |
+| **PostgreSQL** | `postgres:15` | 5432 | Data persistence (conversations, memory, settings) | `templates/postgresql-deployment.yaml` |
+| **Redis** | `redis:7-alpine` | 6379 | Cache, session state | `templates/redis-deployment.yaml` |
+| **Cloudflared** | `cloudflare/cloudflared:latest` | — | Cloudflare Tunnel for HTTPS access | `templates/cloudflared.yaml` |
 
-### K8s Manifest Overview
+### Chart Layout
 
 ```
-deploy/k3s/manifests/
-├── 00-namespace.yaml          # hermes namespace
-├── 01-secrets.yaml            # Secrets template (CF + app secrets)
-├── 01a-rbac.yaml              # ServiceAccount + RBAC (cluster-reader + ns-writer)
-├── 02-configmap.yaml          # Configuration (domain, ports, DB, Redis)
-├── 03-pvc.yaml                # Persistent volumes (agent, postgres, redis)
-├── 04-postgresql.yaml         # PostgreSQL 15 deployment + service
-├── 05-redis.yaml              # Redis 7 deployment + service
-├── 06-hermes.yaml             # Hermes Agent deployment + service
-├── 08-cloudflared.yaml        # Cloudflare Tunnel deployment
-├── 09-ingress.yaml            # Traefik ingress routing
-├── 10-network-policy.yaml     # Network policies (DB + Redis access control)
-└── 11-terminal.yaml           # ttyd browser terminal (kubectl exec into agent)
+.
+├── Chart.yaml                              # apiVersion v2, name: hermes
+├── values.yaml                             # All defaults + per-component switches
+├── .helmignore
+└── templates/
+    ├── namespace.yaml                      # Guarded by namespace.create
+    ├── rbac.yaml                           # SA + ClusterRole + Role
+    ├── configmap.yaml                      # cf-config + hermes-config + toolset overrides
+    ├── secret.yaml                         # hermes-secrets + cf-secrets (stringData)
+    ├── pvc.yaml                            # 3 PVCs (agent / postgres / redis)
+    ├── postgresql-deployment.yaml          # postgresql.enabled
+    ├── redis-deployment.yaml               # redis.enabled
+    ├── hermes-deployment.yaml              # Agent Deployment + Service (Gateway + Dashboard)
+    ├── cloudflared.yaml                    # cloudflared.enabled
+    ├── ingress.yaml                        # cloudflare.ingress.enabled
+    ├── network-policy.yaml                 # networkPolicy.enabled
+    ├── terminal.yaml                       # terminal.enabled (ttyd + SA/Role/RoleBinding)
+    └── disk-cleanup-cronjob.yaml           # diskCleanup.enabled (nightly)
 ```
 
 ---
@@ -340,10 +335,11 @@ Auth: HTTP Basic (admin / configured password)
 
 ### Manifest
 
-The terminal is deployed as a separate lightweight pod (`deploy/k3s/manifests/11-terminal.yaml`):
+The terminal is deployed as a separate lightweight pod (`templates/terminal.yaml`, enabled by default via `terminal.enabled: true`):
 - **Image**: `ubuntu:24.04` (ttyd + kubectl downloaded at startup)
 - **Resources**: 50m CPU / 64Mi RAM (request), 200m CPU / 256Mi (limit)
 - **RBAC**: Dedicated ServiceAccount with pods/get,list + pods/exec only
+- Set `terminal.enabled: false` in `values.yaml` to skip.
 
 ---
 
@@ -406,49 +402,74 @@ The terminal is deployed as a separate lightweight pod (`deploy/k3s/manifests/11
 
 ---
 
-## Deployment Options
+## Deployment
 
-### Comparison
+### Prerequisites
 
-| Feature | K3s Kubernetes | Podman Single-Node |
-|---------|---------------|-------------------|
-| **Target** | Multi-instance production | Single-instance / dev |
-| **Scaling** | Horizontal (multiple namespaces) | Single pod |
-| **Storage** | Longhorn PVC (5Gi) | Named volumes |
-| **Networking** | Ingress + NetworkPolicy | Port mapping |
-| **HTTPS** | Cloudflare Tunnel (sidecar) | Manual / reverse proxy |
-| **Resources** | Shared across cluster nodes | Dedicated host (8GB+ RAM) |
+- K3s (or any Kubernetes 1.24+) cluster with `kubectl` access
+- Helm 3.x
+- Longhorn storage class for the agent PVC (or override `hermes.persistence.storageClassName`)
+- `local-path` (or any RWO class) for PostgreSQL and Redis
+- A Cloudflare account with a Tunnel token (if you want the built-in HTTPS ingress)
 
-### K3s Deployment
-
-**Prerequisites**: K3s cluster with `kubectl` access, Longhorn storage, Cloudflare account.
+### Quick Start (Helm)
 
 ```bash
 # 1. Clone this repo
-git clone https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all.git
-cd Woow_hermes_agent_docker_compose_all
+git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
+cd Woow_k3s_hermes
 
-# 2. Copy and edit environment file
-cp .env.example .env
-vim .env  # Set MINIMAX_API_KEY, OPENROUTER_API_KEY, etc.
+# 2. Create a values override with your secrets and domain
+cat > my-values.yaml <<'EOF'
+namespace:
+  name: hermes
 
-# 3. Deploy to K3s
-cd deploy/k3s
-bash deploy.sh <instance-name>
+secrets:
+  API_SERVER_KEY:     "<generate-a-strong-key>"
+  MINIMAX_API_KEY:    "<your-minimax-key>"
+  POSTGRES_PASSWORD:  "<pg-password>"
+  TTYD_PASSWORD:      "<ttyd-basic-auth>"
+  CF_API_TOKEN:       "<cloudflare-api-token>"
+  CF_TUNNEL_TOKEN:    "<cloudflare-tunnel-token>"
+
+cloudflare:
+  domain: hermes.example.com
+  ingress:
+    enabled: true
+    className: traefik
+EOF
+
+# 3. Install (creates the namespace + all resources)
+helm install hermes . -n hermes --create-namespace -f my-values.yaml
+
+# 4. Watch it come up
+kubectl -n hermes get pods -w
 ```
 
-Manifests are applied in order:
-1. `00-namespace.yaml` — Namespace creation
-2. `01a-rbac.yaml` — RBAC for hermes user
-3. `02-configmap.yaml` — golden-config.yaml + golden-settings.json
-4. `03-pvc.yaml` — Longhorn 5Gi persistent volume
-5. `04-postgresql.yaml` — PostgreSQL 15 StatefulSet
-6. `05-redis.yaml` — Redis 7 Deployment
-7. `06-hermes.yaml` — Agent Deployment (Gateway + Dashboard + /chat TUI)
-8. `08-cloudflared.yaml` — Cloudflare Tunnel sidecar
-9. `09-ingress.yaml` — Ingress rules
-10. `10-network-policy.yaml` — Pod-to-pod network isolation
-11. `11-terminal.yaml` — ttyd browser terminal (kubectl exec into agent)
+### Feature Toggles (`values.yaml`)
+
+Every component ships behind an `enabled` flag so you can strip the chart down for
+dev clusters or turn everything on for a full production install.
+
+| Toggle | Default | What it renders |
+|--------|---------|-----------------|
+| `namespace.create` | `true` | The `Namespace` object itself. |
+| `postgresql.enabled` | `true` | PostgreSQL 15 Deployment + Service + PVC. |
+| `redis.enabled` | `true` | Redis 7-alpine Deployment + Service + PVC. |
+| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment (needs `CF_TUNNEL_TOKEN`). |
+| `cloudflare.ingress.enabled` | `true` | `Ingress` that routes `<domain>/api` to the gateway. |
+| `terminal.enabled` | `true` | ttyd browser terminal (SA/Role/RoleBinding + Deployment + Service). |
+| `diskCleanup.enabled` | `true` | Nightly CronJob that trims journals + dumps on the agent PVC. |
+| `networkPolicy.enabled` | `true` | NetworkPolicies restricting DB/Redis to `hermes-agent` pods. |
+| `hermes.service.nodePort` / `dashboardNodePort` | `null` | Only rendered when `hermes.service.type: NodePort`. |
+
+### Preview / diff before applying
+
+```bash
+helm lint .
+helm template hermes . -f my-values.yaml | less
+helm diff upgrade hermes . -n hermes -f my-values.yaml   # if helm-diff plugin installed
+```
 
 ### Golden Configuration (`config/golden-config.yaml`)
 
@@ -525,19 +546,29 @@ docker push <registry>/hermes-agent-custom:latest
 ## Multi-Instance Deployment
 
 Each instance runs in an isolated Kubernetes namespace with its own:
-- Persistent volume (5Gi Longhorn PVC)
+- Persistent volume (5Gi Longhorn PVC by default)
 - PostgreSQL + Redis
 - Cloudflare Tunnel
+- Helm release name
 
 ### Deploy New Instance
 
+Because everything is namespaced through `.Values.namespace.name`, you can deploy
+tenant B alongside tenant A by installing a second release into a second namespace:
+
 ```bash
-cd deploy/k3s
-bash deploy-instance.sh <prefix> <domain>
-# e.g. bash deploy-instance.sh example example-hermes.example.com
+helm install hermes-tenant-a . \
+  -n tenant-a-hermes --create-namespace \
+  -f tenant-a-values.yaml
+
+helm install hermes-tenant-b . \
+  -n tenant-b-hermes --create-namespace \
+  -f tenant-b-values.yaml
 ```
 
-This creates the namespace, applies all manifests with substituted values, and sets up the Cloudflare Tunnel.
+Each `values.yaml` should set its own `namespace.name`, `cloudflare.domain`, and
+secrets. NetworkPolicies, RBAC, and CronJobs are automatically scoped to that
+namespace by the templates.
 
 ---
 
@@ -679,7 +710,7 @@ Full test documentation:
 | Dashboard TUI blank | Permission mismatch | Dockerfile Layer 7 fixes this; rebuild custom image |
 | Dashboard renders blank page after load | Vite entry-chunk rename | See `docs/troubleshooting.md §1` — patched by `patches/mcp_patch.py` (in-place edit, not rename) |
 | Model returns MiniMax instead of GPT | Missing `@openai-api:` route | Run `config/fix-model-routes.py` to add routes |
-| Cloudflare Tunnel offline | Token expired or tunnel deleted | Re-run `deploy/k3s/init-cloudflare-hermes.py` |
+| Cloudflare Tunnel offline | Token expired or tunnel deleted | Rotate `CF_TUNNEL_TOKEN` in your values file and `helm upgrade` |
 | PVC full (5Gi) | Old conversations accumulate | Archive/delete old sessions via Dashboard Settings |
 | Playwright fails | Chromium not installed | Ensure custom Docker image is used (not base image) |
 | `.env` not syncing after update | Fingerprint mismatch | Run `config/apply-env-fingerprint-patch.py` |
@@ -695,7 +726,7 @@ Full test documentation:
 - Playwright-based E2E test suite (10/10 pass)
 
 ### v0.14 (2026-06)
-- Multi-instance deployment with `deploy-instance.sh`
+- Multi-instance deployment via per-namespace `helm install`
 - White-label branding system (WoowTech + Apporo)
 - Golden config/settings templates
 
@@ -711,7 +742,7 @@ Full test documentation:
 
 **Maintained by**: WOOW Tech (沃科技)
 
-- GitHub Issues: [WOOWTECH/Woow_hermes_agent_docker_compose_all/issues](https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all/issues)
+- GitHub Issues: [WOOWTECH/Woow_k3s_hermes/issues](https://github.com/WOOWTECH/Woow_k3s_hermes/issues)
 - Upstream: [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent)
 
 **License**: Proprietary — WOOW Tech deployment and customization layer. Upstream components retain their respective licenses.

@@ -1,21 +1,16 @@
-# =============================================================
-# Hermes Agent - RBAC for kubectl access
-# Cluster-wide read + hermes namespace limited write
-# =============================================================
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: hermes-agent-sa
-  namespace: __NAMESPACE__
+  name: {{ .Values.hermes.serviceAccountName }}
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-agent
     app.kubernetes.io/part-of: hermes
 ---
-# Cluster-wide read-only
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: __NAMESPACE__-agent-cluster-reader
+  name: {{ .Values.namespace.name }}-agent-cluster-reader
 rules:
   - apiGroups: [""]
     resources: ["pods", "services", "endpoints", "namespaces", "nodes",
@@ -37,22 +32,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: __NAMESPACE__-agent-cluster-reader-binding
+  name: {{ .Values.namespace.name }}-agent-cluster-reader-binding
 subjects:
   - kind: ServiceAccount
-    name: hermes-agent-sa
-    namespace: __NAMESPACE__
+    name: {{ .Values.hermes.serviceAccountName }}
+    namespace: {{ .Values.namespace.name }}
 roleRef:
   kind: ClusterRole
-  name: __NAMESPACE__-agent-cluster-reader
+  name: {{ .Values.namespace.name }}-agent-cluster-reader
   apiGroup: rbac.authorization.k8s.io
 ---
-# Hermes namespace limited write
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: hermes-agent-ns-writer
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -80,11 +74,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: hermes-agent-ns-writer-binding
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
 subjects:
   - kind: ServiceAccount
-    name: hermes-agent-sa
-    namespace: __NAMESPACE__
+    name: {{ .Values.hermes.serviceAccountName }}
+    namespace: {{ .Values.namespace.name }}
 roleRef:
   kind: Role
   name: hermes-agent-ns-writer

@@ -1,52 +1,27 @@
-# =============================================================
-# Disk Cleanup CronJob — hermes agent PVC hygiene
-# =============================================================
-# Why: state.db grows unbounded (messages FTS index), request_dump_*.json
-#      accumulates one file per agent request (had 3724 files = 535MB in
-#      the woow-k3s hermes namespace before cleanup). Once the PVC fills
-#      up, session file writes silently corrupt (JSON truncation), causing
-#      "Invalid \uXXXX escape" load errors and eventually breaking chat.
-#
-# What: Nightly (03:00 UTC) prune of stale on-PVC files that hermes-agent
-#       never reads back — request_dump_* over 7 days, _run_journal over
-#       30 days, curator logs over 30 days, rotated gateway logs beyond
-#       the newest 3, plus explicit backup dirs from prior manual wipes.
-#
-# Longhorn RWO note: The volume is single-node RWO, so this pod MUST run
-# on the same node as the hermes pod. `podAffinity` on `app=hermes`
-# enforces that.
-#
-# Also recommended: expand the PVC from the default 5Gi. Longhorn supports
-# online expansion:
-#   kubectl -n __NAMESPACE__ patch pvc hermes-webui-data \
-#     -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
-# (PVC name retained for backward compatibility.)
-# =============================================================
+{{- if .Values.diskCleanup.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: hermes-disk-cleanup
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-cleanup
     app.kubernetes.io/part-of: hermes
 spec:
-  schedule: "0 3 * * *"          # 03:00 UTC daily
+  schedule: {{ .Values.diskCleanup.schedule | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1
-      ttlSecondsAfterFinished: 604800   # keep 7 days for postmortem
+      ttlSecondsAfterFinished: 604800
       template:
         metadata:
           labels:
             app: hermes-cleanup
         spec:
           restartPolicy: OnFailure
-          # Longhorn RWO: must share the hermes pod's node so the PVC
-          # doesn't need to detach/reattach.
           affinity:
             podAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -56,10 +31,10 @@ spec:
                 topologyKey: kubernetes.io/hostname
           containers:
           - name: cleanup
-            image: busybox:1.36
+            image: "{{ .Values.diskCleanup.image.repository }}:{{ .Values.diskCleanup.image.tag }}"
+            imagePullPolicy: {{ .Values.diskCleanup.image.pullPolicy }}
             resources:
-              limits: {cpu: "200m", memory: "128Mi"}
-              requests: {cpu: "50m", memory: "32Mi"}
+              {{- toYaml .Values.diskCleanup.resources | nindent 14 }}
             command:
             - sh
             - -c
@@ -96,4 +71,5 @@ spec:
           volumes:
           - name: data
             persistentVolumeClaim:
-              claimName: hermes-webui-data
+              claimName: {{ .Values.hermes.persistence.claimName }}
+{{- end }}

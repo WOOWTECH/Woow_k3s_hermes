@@ -18,15 +18,12 @@
     <a href="README.md">English</a> |
     <a href="README_zh-TW.md">繁體中文</a>
   </p>
-
-  <p>
-    <code>main</code> · <strong><code>k3s</code></strong> · <a href="../../tree/podman"><code>podman</code></a>
-  </p>
 </div>
 
-> **這是 `k3s` 分支** — 包含 Kubernetes 部署 manifests、腳本和設定。<br/>
-> 尋找 Podman？切換到 [`podman` 分支](../../tree/podman)。<br/>
-> 需要概覽？請見 [`main` 分支](../../tree/main)。
+> [!IMPORTANT]
+> **本 repository 以 Helm chart 方式打包 Hermes Agent，適用於 K3s / Kubernetes。**
+>
+> 如需單機 Podman 部署，請前往姊妹 repository：[**WOOWTECH/Woow_podman_hermes**](https://github.com/WOOWTECH/Woow_podman_hermes)。
 
 ---
 
@@ -38,8 +35,6 @@
 - [系統元件](#系統元件)
 - [截圖展示](#截圖展示)
 - [部署方式](#部署方式)
-- [快速開始](#快速開始)
-- [配置說明](#配置說明)
 - [自訂 Docker 映像](#自訂-docker-映像)
 - [多實例部署](#多實例部署)
 - [白標品牌](#白標品牌)
@@ -66,7 +61,7 @@
 | 通用 AI 助手缺乏領域知識 | **93 個領域技能**，包含 Odoo 18 ERP、ESG/WELL/LEED、金融 |
 | 單一模型綁定 | **多 LLM 支援**：MiniMax M2.7 主要模型 + OpenAI/Claude/GLM via OpenRouter |
 | 無瀏覽器自動化能力 | **Playwright + Chromium 148** 內建於 Agent 容器 |
-| Kubernetes 部署複雜 | **一鍵部署** `deploy.sh` + 黃金配置 |
+| Kubernetes 部署複雜 | **一鍵部署** `helm install` + 黃金配置 |
 | 僅支援單租戶 | **多實例隔離**，命名空間隔離 + 每租戶獨立品牌 |
 
 ---
@@ -197,43 +192,61 @@ graph BT
     BASE --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
 ```
 
-### 部署方式比較
+### K3s 資源總覽
 
 ```mermaid
 graph LR
-    subgraph K3s["K3s Kubernetes"]
+    subgraph K3s["K3s / Kubernetes（Helm chart）"]
         direction TB
         K_NS["每實例獨立 Namespace"]
-        K_DEP["Deployment + Service"]
+        K_DEP["Hermes Deployment + Service"]
         K_PVC["Longhorn PVC 5Gi"]
-        K_CF["Cloudflare Tunnel Sidecar"]
+        K_CF["Cloudflare Tunnel Deployment"]
         K_ING["Ingress + NetworkPolicy"]
+        K_CRON["每晚磁碟清理 CronJob"]
         K_NS --> K_DEP --> K_PVC
         K_DEP --> K_CF
         K_DEP --> K_ING
-    end
-
-    subgraph Podman["Podman 單節點"]
-        direction TB
-        P_POD["Podman Pod（3 容器）"]
-        P_VOL["具名磁碟區"]
-        P_PORT["端口映射<br/>19119 / 18642"]
-        P_POD --> P_VOL
-        P_POD --> P_PORT
+        K_NS --> K_CRON
     end
 ```
+
+> Podman 單機部署位於姊妹 repository [WOOWTECH/Woow_podman_hermes](https://github.com/WOOWTECH/Woow_podman_hermes)。
 
 ---
 
 ## 系統元件
 
-| 元件 | 映像 | 端口 | 用途 | K8s Manifest |
-|------|------|------|------|-------------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `06-hermes.yaml` |
-| **瀏覽器終端** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | 瀏覽器 TUI — kubectl exec 進入 hermes-agent shell | `11-terminal.yaml` |
-| **PostgreSQL** | `postgres:15` | 5432 | 資料持久化（對話、記憶、設定） | `04-postgresql.yaml` |
-| **Redis** | `redis:7-alpine` | 6379 | 快取、Session 狀態 | `05-redis.yaml` |
-| **Cloudflared** | `cloudflare/cloudflared:latest` | — | Cloudflare Tunnel，提供 HTTPS 存取 | `08-cloudflared.yaml` |
+| 元件 | 映像 | 端口 | 用途 | Chart 模板 |
+|------|------|------|------|-----------|
+| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `templates/hermes-deployment.yaml` |
+| **瀏覽器終端** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | 瀏覽器 TUI — kubectl exec 進入 hermes-agent shell | `templates/terminal.yaml` |
+| **PostgreSQL** | `postgres:15` | 5432 | 資料持久化（對話、記憶、設定） | `templates/postgresql-deployment.yaml` |
+| **Redis** | `redis:7-alpine` | 6379 | 快取、Session 狀態 | `templates/redis-deployment.yaml` |
+| **Cloudflared** | `cloudflare/cloudflared:latest` | — | Cloudflare Tunnel，提供 HTTPS 存取 | `templates/cloudflared.yaml` |
+
+### Chart 目錄結構
+
+```
+.
+├── Chart.yaml                              # apiVersion v2、name: hermes
+├── values.yaml                             # 所有預設值與各元件開關
+├── .helmignore
+└── templates/
+    ├── namespace.yaml                      # 由 namespace.create 控制
+    ├── rbac.yaml                           # SA + ClusterRole + Role
+    ├── configmap.yaml                      # cf-config + hermes-config + toolset 覆寫
+    ├── secret.yaml                         # hermes-secrets + cf-secrets（stringData）
+    ├── pvc.yaml                            # 3 個 PVC（agent / postgres / redis）
+    ├── postgresql-deployment.yaml          # postgresql.enabled
+    ├── redis-deployment.yaml               # redis.enabled
+    ├── hermes-deployment.yaml              # Agent Deployment + Service（Gateway + Dashboard）
+    ├── cloudflared.yaml                    # cloudflared.enabled
+    ├── ingress.yaml                        # cloudflare.ingress.enabled
+    ├── network-policy.yaml                 # networkPolicy.enabled
+    ├── terminal.yaml                       # terminal.enabled（ttyd + SA/Role/RoleBinding）
+    └── disk-cleanup-cronjob.yaml           # diskCleanup.enabled（每晚執行）
+```
 
 ---
 
@@ -362,47 +375,71 @@ URL:  https://<PREFIX>-hermes-terminal.woowtech.io
 
 ## 部署方式
 
-### 比較
+### 前置條件
 
-| 功能 | K3s Kubernetes | Podman 單節點 |
-|------|---------------|--------------|
-| **適用場景** | 多實例正式環境 | 單實例 / 開發測試 |
-| **擴展性** | 水平擴展（多命名空間） | 單一 Pod |
-| **儲存** | Longhorn PVC（5Gi） | 具名磁碟區 |
-| **網路** | Ingress + NetworkPolicy | 端口映射 |
-| **HTTPS** | Cloudflare Tunnel（Sidecar） | 手動 / 反向代理 |
-| **資源需求** | 共享叢集節點 | 獨立主機（8GB+ RAM） |
+- K3s（或任何 Kubernetes 1.24+）叢集，且可用 `kubectl`
+- Helm 3.x
+- Longhorn 儲存類別給 agent PVC 使用（或以 `hermes.persistence.storageClassName` 覆寫）
+- `local-path`（或任何 RWO 類別）供 PostgreSQL 和 Redis 使用
+- Cloudflare 帳號與 Tunnel token（若要使用內建 HTTPS ingress）
 
-### K3s 部署
-
-**前置條件**：K3s 叢集（可用 `kubectl`）、Longhorn 儲存、Cloudflare 帳號。
+### 快速開始（Helm）
 
 ```bash
 # 1. 複製本倉庫
-git clone https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all.git
-cd Woow_hermes_agent_docker_compose_all
+git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
+cd Woow_k3s_hermes
 
-# 2. 複製並編輯環境變數
-cp .env.example .env
-vim .env  # 設定 MINIMAX_API_KEY, OPENROUTER_API_KEY 等
+# 2. 建立含機密與網域的 values override
+cat > my-values.yaml <<'EOF'
+namespace:
+  name: hermes
 
-# 3. 部署到 K3s
-cd deploy/k3s
-bash deploy.sh <instance-name>
+secrets:
+  API_SERVER_KEY:     "<generate-a-strong-key>"
+  MINIMAX_API_KEY:    "<your-minimax-key>"
+  POSTGRES_PASSWORD:  "<pg-password>"
+  TTYD_PASSWORD:      "<ttyd-basic-auth>"
+  CF_API_TOKEN:       "<cloudflare-api-token>"
+  CF_TUNNEL_TOKEN:    "<cloudflare-tunnel-token>"
+
+cloudflare:
+  domain: hermes.example.com
+  ingress:
+    enabled: true
+    className: traefik
+EOF
+
+# 3. 安裝（會自動建立 namespace 與所有資源）
+helm install hermes . -n hermes --create-namespace -f my-values.yaml
+
+# 4. 觀察啟動狀態
+kubectl -n hermes get pods -w
 ```
 
-依序套用 K8s manifests：
-1. `00-namespace.yaml` — 建立命名空間
-2. `01a-rbac.yaml` — RBAC 權限設定
-3. `02-configmap.yaml` — golden-config.yaml + golden-settings.json
-4. `03-pvc.yaml` — Longhorn 5Gi 持久化磁碟區
-5. `04-postgresql.yaml` — PostgreSQL 15 StatefulSet
-6. `05-redis.yaml` — Redis 7 Deployment
-7. `06-hermes.yaml` — Agent Deployment（Gateway + Dashboard + /chat TUI）
-8. `08-cloudflared.yaml` — Cloudflare Tunnel Sidecar
-9. `09-ingress.yaml` — Ingress 規則
-10. `10-network-policy.yaml` — Pod 間網路隔離
-11. `11-terminal.yaml` — ttyd 瀏覽器終端（kubectl exec 到 agent）
+### 功能開關（`values.yaml`）
+
+每個元件都以 `enabled` 開關獨立控制，開發叢集可以只保留最小組合，正式環境則可全部開啟。
+
+| 開關 | 預設 | 產出內容 |
+|------|------|----------|
+| `namespace.create` | `true` | `Namespace` 物件本身。 |
+| `postgresql.enabled` | `true` | PostgreSQL 15 Deployment + Service + PVC。 |
+| `redis.enabled` | `true` | Redis 7-alpine Deployment + Service + PVC。 |
+| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment（需 `CF_TUNNEL_TOKEN`）。 |
+| `cloudflare.ingress.enabled` | `true` | 將 `<domain>/api` 導向 gateway 的 `Ingress`。 |
+| `terminal.enabled` | `true` | ttyd 瀏覽器終端（SA/Role/RoleBinding + Deployment + Service）。 |
+| `diskCleanup.enabled` | `true` | 每晚清理 agent PVC 上的 journal 與 dump 檔的 CronJob。 |
+| `networkPolicy.enabled` | `true` | 限制 `hermes-agent` 以外 Pod 無法連線資料庫的 NetworkPolicy。 |
+| `hermes.service.nodePort` / `dashboardNodePort` | `null` | 只在 `hermes.service.type: NodePort` 時才輸出。 |
+
+### 套用前預覽 / diff
+
+```bash
+helm lint .
+helm template hermes . -f my-values.yaml | less
+helm diff upgrade hermes . -n hermes -f my-values.yaml   # 如已安裝 helm-diff plugin
+```
 
 ### 黃金配置（`config/golden-config.yaml`）
 
@@ -479,19 +516,28 @@ docker push <registry>/hermes-agent-custom:latest
 ## 多實例部署
 
 每個實例運行在獨立的 Kubernetes 命名空間中，擁有：
-- 獨立持久化磁碟區（5Gi Longhorn PVC）
+- 獨立持久化磁碟區（預設 5Gi Longhorn PVC）
 - 獨立 PostgreSQL + Redis
 - 獨立 Cloudflare Tunnel
+- 獨立 Helm release 名稱
 
 ### 部署新實例
 
+由於所有資源都透過 `.Values.namespace.name` 命名空間化，只要在新的 namespace
+安裝第二個 release，即可讓租戶 B 與租戶 A 並存：
+
 ```bash
-cd deploy/k3s
-bash deploy-instance.sh <prefix> <domain>
-# 例如：bash deploy-instance.sh example example-hermes.example.com
+helm install hermes-tenant-a . \
+  -n tenant-a-hermes --create-namespace \
+  -f tenant-a-values.yaml
+
+helm install hermes-tenant-b . \
+  -n tenant-b-hermes --create-namespace \
+  -f tenant-b-values.yaml
 ```
 
-此命令會建立命名空間、套用所有 manifest（帶入替換值），並設定 Cloudflare Tunnel。
+每個 `values.yaml` 需分別設定自己的 `namespace.name`、`cloudflare.domain` 與
+機密。NetworkPolicy、RBAC 與 CronJob 都會自動歸屬於各自的 namespace。
 
 ---
 
@@ -632,7 +678,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 | Dashboard TUI 空白 | 權限不符 | Dockerfile 第 7 層已修復，重建自訂映像 |
 | Dashboard 頁面載入後空白 | Vite entry-chunk 被改名 | 詳見 `docs/troubleshooting.md §1` — `patches/mcp_patch.py` 已改為原地編輯，不再改名 |
 | 模型回傳 MiniMax 而非 GPT | 缺少 `@openai-api:` 路由 | 執行 `config/fix-model-routes.py` 新增路由 |
-| Cloudflare Tunnel 離線 | Token 過期或 Tunnel 被刪除 | 重新執行 `deploy/k3s/init-cloudflare-hermes.py` |
+| Cloudflare Tunnel 離線 | Token 過期或 Tunnel 被刪除 | 在 values 檔更新 `CF_TUNNEL_TOKEN` 後執行 `helm upgrade` |
 | PVC 滿了（5Gi） | 舊對話累積 | 透過 Dashboard Settings 封存/刪除舊 Session |
 | Playwright 失敗 | Chromium 未安裝 | 確保使用自訂 Docker 映像（非基礎映像） |
 | `.env` 更新後未同步 | 指紋不符 | 執行 `config/apply-env-fingerprint-patch.py` |
@@ -648,7 +694,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 - Playwright E2E 測試套件（10/10 通過）
 
 ### v0.14（2026-06）
-- 多實例部署 `deploy-instance.sh`
+- 多實例部署改用逐 namespace 的 `helm install`
 - 白標品牌系統（WoowTech + Apporo）
 - 黃金配置/設定模板
 
@@ -664,7 +710,7 @@ kubectl -n hermes exec <pod> -c hermes-agent -- bash /tmp/vedg.sh
 
 **維護團隊**：WOOW Tech 沃科技
 
-- GitHub Issues：[WOOWTECH/Woow_hermes_agent_docker_compose_all/issues](https://github.com/WOOWTECH/Woow_hermes_agent_docker_compose_all/issues)
+- GitHub Issues：[WOOWTECH/Woow_k3s_hermes/issues](https://github.com/WOOWTECH/Woow_k3s_hermes/issues)
 - 上游專案：[Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent)
 - 使用手冊：[docs/user-manual-zh-TW.md](docs/user-manual-zh-TW.md)（25 章完整中文手冊）
 

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: hermes
+description: WoowTech Hermes Agent — enterprise AI assistant (Nous Research hermes-agent) deployed on Kubernetes / K3s
+type: application
+version: 1.0.0
+appVersion: "0.17.0"
+keywords:
+  - hermes
+  - ai-assistant
+  - llm
+  - agent
+  - dashboard
+  - mcp
+home: https://github.com/WOOWTECH/Woow_k3s_hermes
+sources:
+  - https://github.com/WOOWTECH/Woow_k3s_hermes
+  - https://github.com/NousResearch/hermes-agent
+maintainers:
+  - name: WOOW Tech
+    url: https://github.com/WOOWTECH

@@ -1,0 +1,31 @@
+# Standard helmignore
+.DS_Store
+.git/
+.gitignore
+.github/
+.svn/
+.hg/
+.bzr/
+*.tmp
+*.bak
+*.swp
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+
+# Repository content that isn't part of the chart itself
+deploy/
+docker/
+docs/
+patches/
+tests/
+skills/
+config/
+scripts/
+CHANGELOG.md
+CONTRIBUTING.md
+README.md
+README_zh-TW.md
+.env.example

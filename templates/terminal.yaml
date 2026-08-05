@@ -1,25 +1,15 @@
-# =============================================================
-# Hermes Terminal (ttyd) — Browser-based TUI for hermes-agent
-#
-# Architecture: Browser → Cloudflare Tunnel → ttyd(:7681)
-#   → connect.sh → kubectl exec → hermes-agent bash
-#
-# Replicates VK ttyd pattern (vibe-kanban/11-terminal.yaml)
-# =============================================================
-
-# 1. ServiceAccount
+{{- if .Values.terminal.enabled }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: hermes-terminal-sa
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
 ---
-# 2. Role (minimum: pods/get,list + pods/exec)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: hermes-terminal-role
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -28,31 +18,29 @@ rules:
     resources: ["pods/exec"]
     verbs: ["create", "get"]
 ---
-# 3. RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: hermes-terminal-rb
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
 subjects:
   - kind: ServiceAccount
     name: hermes-terminal-sa
-    namespace: hermes
+    namespace: {{ .Values.namespace.name }}
 roleRef:
   kind: Role
   name: hermes-terminal-role
   apiGroup: rbac.authorization.k8s.io
 ---
-# 4. ConfigMap (connect.sh + startup.sh)
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: hermes-terminal-scripts
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
 data:
   connect.sh: |
     #!/bin/sh
-    NAMESPACE="hermes"
+    NAMESPACE="{{ .Values.namespace.name }}"
     LABEL="app=hermes"
     CONTAINER="hermes-agent"
     while true; do
@@ -82,12 +70,11 @@ data:
     echo "Starting ttyd on :7681..."
     exec ttyd -p 7681 -c "admin:${TUI_PASSWORD}" -W /scripts/connect.sh
 ---
-# 5. Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hermes-terminal
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-terminal
     app.kubernetes.io/component: terminal
@@ -107,7 +94,8 @@ spec:
       serviceAccountName: hermes-terminal-sa
       containers:
         - name: ttyd
-          image: ubuntu:24.04
+          image: "{{ .Values.terminal.image.repository }}:{{ .Values.terminal.image.tag }}"
+          imagePullPolicy: {{ .Values.terminal.image.pullPolicy }}
           command: ["bash", "/scripts/startup.sh"]
           ports:
             - containerPort: 7681
@@ -123,12 +111,7 @@ spec:
             - name: scripts
               mountPath: /scripts
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
+            {{- toYaml .Values.terminal.resources | nindent 12 }}
           readinessProbe:
             tcpSocket:
               port: 7681
@@ -145,12 +128,11 @@ spec:
             name: hermes-terminal-scripts
             defaultMode: 0755
 ---
-# 6. Service
 apiVersion: v1
 kind: Service
 metadata:
   name: hermes-terminal-svc
-  namespace: hermes
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-terminal
     app.kubernetes.io/part-of: hermes
@@ -160,6 +142,7 @@ spec:
   ports:
     - name: ttyd
       protocol: TCP
-      port: 7681
+      port: {{ .Values.terminal.service.port }}
       targetPort: 7681
-  type: ClusterIP
+  type: {{ .Values.terminal.service.type }}
+{{- end }}

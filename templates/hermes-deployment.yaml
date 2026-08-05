@@ -1,21 +1,16 @@
-# =============================================================
-# Hermes - Agent Deployment (single container)
-# =============================================================
-# Agent: nousresearch/hermes-agent:latest (Gateway:8642, Dashboard:9119)
-# =============================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hermes
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes
     app.kubernetes.io/component: agent
     app.kubernetes.io/part-of: hermes
 spec:
-  replicas: 1
+  replicas: {{ .Values.hermes.replicaCount }}
   strategy:
-    type: Recreate
+    type: {{ .Values.hermes.strategy }}
   selector:
     matchLabels:
       app: hermes
@@ -24,13 +19,16 @@ spec:
       labels:
         app: hermes
     spec:
-      serviceAccountName: hermes-agent-sa
+      serviceAccountName: {{ .Values.hermes.serviceAccountName }}
       securityContext:
-        fsGroup: 0
+        {{- toYaml .Values.hermes.securityContext | nindent 8 }}
       containers:
       - name: hermes-agent
-        image: nousresearch/hermes-agent:latest
-        imagePullPolicy: Always
+        image: "{{ .Values.hermes.image.repository }}:{{ .Values.hermes.image.tag }}"
+        # Base manifest used :latest without pullPolicy → default `Always`.
+        # We explicitly set it here (Helm-convention) but the runtime behavior
+        # is identical to the original manifest.
+        imagePullPolicy: {{ .Values.hermes.image.pullPolicy }}
         args: [gateway, run]
         ports:
         - {containerPort: 8642, name: gateway, protocol: TCP}
@@ -58,9 +56,12 @@ spec:
         - {name: PATH, value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/google-cloud-sdk/bin"}
         - {name: HERMES_DASHBOARD_TUI, value: "1"}
         - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "__DASHBOARD_USERNAME__"}
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: "__DASHBOARD_PASSWORD__"}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: {{ .Values.dashboard.username | quote }} }
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: {{ .Values.dashboard.password | quote }} }
         - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
+        {{- if .Values.dashboard.publicUrl }}
+        - {name: HERMES_DASHBOARD_PUBLIC_URL, value: {{ .Values.dashboard.publicUrl | quote }} }
+        {{- end }}
         lifecycle:
           postStart:
             exec:
@@ -95,11 +96,9 @@ spec:
           periodSeconds: 30
           failureThreshold: 5
         resources:
-          requests: {cpu: 200m, memory: 1Gi}
-          limits: {cpu: "2", memory: 6Gi}
+          {{- toYaml .Values.hermes.resources | nindent 10 }}
         securityContext:
-          runAsUser: 0
-          runAsGroup: 0
+          {{- toYaml .Values.hermes.containerSecurityContext | nindent 10 }}
         volumeMounts:
         - {mountPath: /opt/data, name: hermes-data}
         - {mountPath: /shared-pw, name: playwright-shared}
@@ -107,7 +106,7 @@ spec:
       volumes:
       - name: hermes-data
         persistentVolumeClaim:
-          claimName: hermes-webui-data
+          claimName: {{ .Values.hermes.persistence.claimName }}
       - name: playwright-shared
         emptyDir: {}
       - name: tools-shared
@@ -117,7 +116,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: hermes-agent-svc
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes
     app.kubernetes.io/part-of: hermes
@@ -125,6 +124,18 @@ spec:
   selector:
     app: hermes
   ports:
-  - {port: 8642, targetPort: 8642, name: gateway, protocol: TCP}
-  - {port: 9119, targetPort: 9119, name: dashboard, protocol: TCP}
-  type: ClusterIP
+  - port: {{ .Values.hermes.service.gatewayPort }}
+    targetPort: 8642
+    name: gateway
+    protocol: TCP
+    {{- if and (eq .Values.hermes.service.type "NodePort") .Values.hermes.service.nodePort }}
+    nodePort: {{ .Values.hermes.service.nodePort }}
+    {{- end }}
+  - port: {{ .Values.hermes.service.dashboardPort }}
+    targetPort: 9119
+    name: dashboard
+    protocol: TCP
+    {{- if and (eq .Values.hermes.service.type "NodePort") .Values.hermes.service.dashboardNodePort }}
+    nodePort: {{ .Values.hermes.service.dashboardNodePort }}
+    {{- end }}
+  type: {{ .Values.hermes.service.type }}

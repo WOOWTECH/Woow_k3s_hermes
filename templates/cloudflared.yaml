@@ -1,18 +1,15 @@
-# =============================================================
-# Hermes - Cloudflare Tunnel (cloudflared)
-# Provides external access via https://__DOMAIN__
-# =============================================================
+{{- if .Values.cloudflared.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: cloudflared
     app.kubernetes.io/component: tunnel
     app.kubernetes.io/part-of: hermes
 spec:
-  replicas: 1
+  replicas: {{ .Values.cloudflared.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -23,12 +20,15 @@ spec:
       labels:
         app: cloudflared
     spec:
+      {{- with .Values.cloudflared.nodeSelector }}
       nodeSelector:
-        node-role.kubernetes.io/control-plane: "true"
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:latest
+          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
+          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
           args:
             - tunnel
             - run
@@ -56,10 +56,6 @@ spec:
               exec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 128Mi
+            {{- toYaml .Values.cloudflared.resources | nindent 12 }}
       restartPolicy: Always
+{{- end }}

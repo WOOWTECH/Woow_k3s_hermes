@@ -1,19 +1,17 @@
-# =============================================================
-# Hermes - PostgreSQL 15 Deployment + Service
-# =============================================================
+{{- if .Values.postgresql.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hermes-postgresql
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-postgresql
     app.kubernetes.io/component: database
     app.kubernetes.io/part-of: hermes
 spec:
-  replicas: 1
+  replicas: {{ .Values.postgresql.replicaCount }}
   strategy:
-    type: Recreate
+    type: {{ .Values.postgresql.strategy }}
   selector:
     matchLabels:
       app: hermes-postgresql
@@ -24,7 +22,8 @@ spec:
     spec:
       containers:
         - name: postgresql
-          image: postgres:15
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
           ports:
             - containerPort: 5432
               name: postgres
@@ -72,22 +71,17 @@ spec:
             periodSeconds: 30
             failureThreshold: 3
           resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: hermes-postgresql-pvc
+            claimName: {{ .Values.postgresql.persistence.claimName }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: hermes-postgresql-svc
-  namespace: __NAMESPACE__
+  namespace: {{ .Values.namespace.name }}
   labels:
     app: hermes-postgresql
     app.kubernetes.io/part-of: hermes
@@ -96,7 +90,8 @@ spec:
     app: hermes-postgresql
   ports:
     - protocol: TCP
-      port: 5432
+      port: {{ .Values.postgresql.service.port }}
       targetPort: 5432
       name: postgres
-  type: ClusterIP
+  type: {{ .Values.postgresql.service.type }}
+{{- end }}

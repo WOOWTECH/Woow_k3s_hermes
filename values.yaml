@@ -1,0 +1,191 @@
+# =============================================================
+# WoowTech Hermes Agent — Helm chart values
+# Defaults match the original Kustomize/sed-templated K3s manifests.
+# =============================================================
+
+namespace:
+  # Create the namespace as part of `helm install`. Set false if the
+  # namespace is managed externally (e.g. by ArgoCD or a platform op).
+  create: true
+  # Namespace name. Original manifests used "hermes".
+  name: hermes
+
+# Cloudflare Tunnel + public domain — templated into cf-config, hermes-config,
+# ingress, and the cloudflared secret. Leave placeholders when running
+# `helm template` for offline validation; substitute at install time.
+cloudflare:
+  domain: __DOMAIN__
+  accountId: __CF_ACCOUNT_ID__
+  tunnelId: __CF_TUNNEL_ID__
+  ingress:
+    # Optional Traefik ingress for direct in-cluster access on /api.
+    enabled: true
+    className: traefik
+
+secrets:
+  # Rendered into `hermes-secrets` (agent Deployment references these keys).
+  API_SERVER_KEY: changeme
+  MINIMAX_API_KEY: changeme
+  POSTGRES_PASSWORD: changeme
+  # ttyd browser terminal (optional, see terminal.enabled below).
+  TTYD_PASSWORD: changeme
+  # Rendered into `cf-secrets` for the cloudflared sidecar.
+  CF_API_TOKEN: changeme
+  CF_TUNNEL_TOKEN: changeme
+
+# Dashboard basic-auth credentials (baked directly into the agent env).
+dashboard:
+  username: admin
+  password: changeme
+  # Public URL for MCP OAuth callbacks. Leave empty to omit.
+  publicUrl: ""
+
+hermes:
+  image:
+    repository: nousresearch/hermes-agent
+    tag: latest
+    # Original manifest explicitly set `Always` — retained here so the
+    # default Helm behavior matches the raw-manifest behavior when tag=latest.
+    pullPolicy: Always
+  replicaCount: 1
+  serviceAccountName: hermes-agent-sa
+  # Deployment strategy — SQLite / single-writer PVC requires Recreate.
+  strategy: Recreate
+  service:
+    type: ClusterIP
+    gatewayPort: 8642
+    dashboardPort: 9119
+    # Only rendered when service.type=NodePort.
+    nodePort: null
+    dashboardNodePort: null
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+  securityContext:
+    fsGroup: 0
+  containerSecurityContext:
+    runAsUser: 0
+    runAsGroup: 0
+  persistence:
+    # PVC name retained (hermes-webui-data) for backward compatibility
+    # with existing Longhorn volumes from the pre-single-container era.
+    claimName: hermes-webui-data
+    storageClassName: longhorn
+    size: 5Gi
+  config:
+    HERMES_DOMAIN: __DOMAIN__
+    HERMES_BASE_URL: https://__DOMAIN__
+    HERMES_AGENT_PORT: "8642"
+    POSTGRES_HOST: hermes-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: hermes-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  strategy: Recreate
+  service:
+    type: ClusterIP
+    port: 5432
+  persistence:
+    claimName: hermes-postgresql-pvc
+    storageClassName: local-path
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  strategy: Recreate
+  service:
+    type: ClusterIP
+    port: 6379
+  persistence:
+    claimName: hermes-redis-pvc
+    storageClassName: local-path
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 300Mi
+
+cloudflared:
+  enabled: true
+  image:
+    repository: cloudflare/cloudflared
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# NetworkPolicy that restricts postgres/redis ingress to the hermes agent.
+networkPolicy:
+  enabled: true
+
+# ttyd browser terminal (K3s-only add-on): shell into hermes-agent via
+# kubectl exec in a separate lightweight pod.
+terminal:
+  enabled: true
+  image:
+    repository: ubuntu
+    tag: "24.04"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 7681
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Nightly disk-cleanup CronJob for the hermes agent PVC.
+diskCleanup:
+  enabled: true
+  schedule: "0 3 * * *"
+  image:
+    repository: busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
