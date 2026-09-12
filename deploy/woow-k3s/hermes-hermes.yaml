@@ -1,0 +1,58 @@
+# Instance values for the live "hermes" release in namespace "hermes".
+# This is the most complete live instance and is what values.yaml's
+# defaults are modeled on, so this file is mostly overrides for what's
+# genuinely specific to it (domain, toolsets override content). No secret
+# values here — see examples/secrets.example.yaml for what must already
+# exist as Secrets "hermes-secrets" and "cf-secrets" in this namespace.
+#
+#   helm upgrade --install hermes . -n hermes --create-namespace \
+#     -f deploy/woow-k3s/hermes-hermes.yaml \
+#     --set-string hermes.dashboardAuth.password="$(the live dashboard password)"
+
+instance: hermes
+
+namespace:
+  name: hermes
+
+cloudflare:
+  domain: woowtech-hermes.woowtech.io
+
+hermes:
+  config:
+    HERMES_DOMAIN: woowtech-hermes.woowtech.io
+    # Deliberately NOT the tunnel domain above — this is how the live
+    # ConfigMap is actually set.
+    HERMES_BASE_URL: https://woowtech-dashboard.woowtech.io
+    HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
+    POSTGRES_HOST: hermes-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: hermes-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+  # Real value intentionally left blank — see hermes.dashboardAuth comment
+  # in values.yaml. Supply it at apply time, never commit it.
+  dashboardAuth:
+    enabled: true
+    username: admin
+    password: ""
+  # Only this live instance has a hermes-toolsets-override ConfigMap with
+  # real content (a one-off script that tweaks config.yaml on start).
+  toolsetsOverride:
+    enabled: true
+    data:
+      apply-toolsets.sh: |
+        #!/bin/sh
+        sleep 3
+        yq -i '.platform_toolsets.api_server = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.platform_toolsets.webui = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.platform_toolsets.cli = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.model.default = "minimax/MiniMax-M2.7"' /opt/data/config.yaml
+        yq -i '.model.provider = "minimax"' /opt/data/config.yaml
+        yq -i '.model.context_length = 200000' /opt/data/config.yaml
+
+# Everything else (postgresql, redis, cloudflared, terminal, diskCleanup,
+# networkPolicy, ingress, rbac) is left at chart defaults, which already
+# reproduce this instance.
