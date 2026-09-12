@@ -32,7 +32,8 @@ hermes:
   serviceAccountName: ""
   serviceAccount:
     create: false
-  podSecurityContext: {}
+  # null (not {}): {} would deep-merge and leave fsGroup:0 in place.
+  podSecurityContext: null
   probes:
     enabled: false
   configMap:
