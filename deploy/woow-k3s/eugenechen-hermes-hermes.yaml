@@ -1,0 +1,236 @@
+# Instance values for the live "hermes" release in namespace
+# "eugenechen-hermes". This is the oldest, sidecar-era shape still running:
+# a disabled (replicas: 0, MUST STAY 0) two-container agent+webui pod,
+# ephemeral (no-PVC) Postgres/Redis, and a Cloudflare Tunnel that is
+# currently configured with the token as a literal CLI arg instead of a
+# Secret (see cloudflared.tokenArg below — do not "fix" this on takeover,
+# it would restart the tunnel pod under a new hash for no operational gain;
+# tracked as a follow-up instead).
+#
+# TWO values below are intentionally left blank because the chart must
+# never commit a real secret value: postgresql's plaintext POSTGRES_PASSWORD
+# env var, and cloudflared's --token arg. Supply both out of band before a
+# real takeover — piped into --set-string, never written to a file:
+#
+#   helm upgrade --install eugenechen-hermes-hermes . -n eugenechen-hermes \
+#     -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml --take-ownership \
+#     --set-string 'postgresql.env[2].value'="$PGPASS" \
+#     --set-string cloudflared.tokenArg="$TUNNEL_TOKEN" \
+#     --set-string hermes.dashboardAuth.password="$DASHPASS"
+
+instance: hermes
+
+namespace:
+  name: eugenechen-hermes
+
+secrets:
+  create: false
+
+hermes:
+  replicaCount: 0 # MUST STAY 0 — this instance is intentionally disabled.
+  renderLabels: false
+  serviceAccountName: ""
+  serviceAccount:
+    create: false
+  podSecurityContext: {}
+  sharedVolumes:
+    enabled: false
+  persistence:
+    claimName: hermes-data
+    storageClassName: longhorn
+    size: 10Gi
+  env:
+    - {name: HERMES_DASHBOARD, value: "1"}
+    - {name: HERMES_DASHBOARD_INSECURE, value: "1"}
+    - {name: HERMES_DASHBOARD_TUI, value: "1"}
+    - {name: HERMES_TUI_DIR, value: /opt/hermes/ui-tui}
+    - {name: HERMES_UID, value: "1000"}
+    - {name: HERMES_GID, value: "1000"}
+    - {name: API_SERVER_ENABLED, value: "true"}
+    - {name: API_SERVER_HOST, value: "0.0.0.0"}
+    - name: API_SERVER_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+    - {name: API_SERVER_CORS_ORIGINS, value: "*"}
+    - {name: GATEWAY_ALLOW_ALL_USERS, value: "true"}
+    - name: MINIMAX_API_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
+    - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+  dashboardAuth:
+    enabled: true
+    username: admin
+    password: ""
+  lifecyclePostStart: >-
+    sed -i '/^  - hermes-cli$/d' /opt/data/config.yaml 2>/dev/null;
+    rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null;
+    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes 2>/dev/null;
+    rm -rf /opt/hermes/skills/apple /opt/hermes/skills/gaming
+    /opt/hermes/skills/email /opt/hermes/skills/social-media
+    /opt/hermes/skills/yuanbao /opt/hermes/skills/media/heartmula
+    /opt/hermes/skills/media/songsee /opt/hermes/skills/media/spotify
+    /opt/hermes/skills/media/youtube-content
+    /opt/hermes/skills/smart-home/openhue 2>/dev/null;
+    SITE=$(/opt/hermes/.venv/bin/python3 -c "import site;print(site.getsitepackages()[0])" 2>/dev/null)
+    && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true
+  # Legacy hermes-webui sidecar — the pre-single-container architecture.
+  # Rendered verbatim; matches the live second container exactly.
+  extraContainers:
+    - name: hermes-webui
+      image: ghcr.io/nesquena/hermes-webui:latest
+      imagePullPolicy: Always
+      command: ["sh", "-c"]
+      args:
+        - |
+          mkdir -p /home/hermeswebui/.hermes
+          echo "MINIMAX_API_KEY=${MINIMAX_API_KEY}" > /home/hermeswebui/.hermes/.env
+          chmod 644 /home/hermeswebui/.hermes/.env
+          for i in $(seq 1 90); do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8642/ 2>/dev/null)
+            [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ] && break
+            sleep 2
+          done
+          rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
+          if [ -f /hermeswebui_init.bash ]; then
+            sed -i 's/chmod 700 "$itdir"/chmod 755 "$itdir"/' /hermeswebui_init.bash 2>/dev/null
+            exec /hermeswebui_init.bash
+          fi
+          cd /app; python server.py
+      env:
+        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
+        - {name: HERMES_WEBUI_GATEWAY_USE_RUNS_API, value: "1"}
+        - name: HERMES_WEBUI_GATEWAY_API_KEY
+          valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+        - {name: HERMES_WEBUI_RUNNER_BASE_URL, value: http://localhost:8642}
+        - name: HERMES_WEBUI_RUNNER_API_KEY
+          valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+        - {name: HERMES_API_URL, value: http://localhost:8642}
+        - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
+        - {name: HERMES_WEBUI_PORT, value: "8787"}
+        - {name: HERMES_WEBUI_PASSWORD, value: admin}
+        - {name: HERMES_GATEWAY_URL, value: http://localhost:8642}
+        - {name: HERMES_BASE_URL, value: https://eugenechen-hermes.woowtech.io}
+        - {name: HERMES_DOMAIN, value: eugenechen-hermes.woowtech.io}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: admin}
+        # Real value intentionally blank — see file header. Supply out of band.
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: ""}
+        - {name: HERMES_WEBUI_STATE_DIR, value: /home/hermeswebui/.hermes/webui}
+        - {name: HERMES_HOME, value: /home/hermeswebui/.hermes}
+      ports:
+        - {containerPort: 8787, name: webui, protocol: TCP}
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 1Gi}
+  # Dashboard/webui NodePorts this legacy instance still exposes, plus a
+  # ClusterIP webui Service — none of these exist on the other instances.
+  extraServices:
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: hermes-dashboard-nodeport
+        namespace: eugenechen-hermes
+      spec:
+        type: NodePort
+        selector: {app: hermes}
+        ports:
+          - {port: 9119, targetPort: 9119, nodePort: 30919}
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: hermes-webui-nodeport
+        namespace: eugenechen-hermes
+      spec:
+        type: NodePort
+        selector: {app: hermes}
+        ports:
+          - {port: 8787, targetPort: 8787, nodePort: 30887}
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: hermes-webui-svc
+        namespace: eugenechen-hermes
+      spec:
+        type: ClusterIP
+        selector: {app: hermes}
+        ports:
+          - {name: webui, port: 8787, targetPort: 8787, protocol: TCP}
+  config:
+    HERMES_DOMAIN: eugenechen-hermes.woowtech.io
+    HERMES_BASE_URL: https://eugenechen-hermes.woowtech.io
+    HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
+    POSTGRES_HOST: hermes-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: hermes-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+
+postgresql:
+  image: {repository: postgres, tag: 16-alpine, pullPolicy: IfNotPresent}
+  containerName: postgres
+  renderLabels: false
+  probes:
+    enabled: false
+  containerPortName: ""
+  svcPortName: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  persistence:
+    enabled: false
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  # Real password intentionally blank — see file header. This live
+  # instance stores it as a plain env value (not a Secret); the chart will
+  # not commit that value. Supply it via --set-string at apply time.
+  env:
+    - {name: POSTGRES_DB, value: hermes}
+    - {name: POSTGRES_USER, value: hermes}
+    - {name: POSTGRES_PASSWORD, value: ""}
+
+redis:
+  renderLabels: false
+  containerPortName: ""
+  svcPortName: ""
+  commandOverride:
+    enabled: false
+  probes:
+    enabled: false
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  persistence:
+    enabled: false
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+
+cloudflared:
+  renderLabels: false
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  args: [tunnel, --no-autoupdate, run]
+  # Real tunnel token intentionally blank — see file header.
+  tokenArg: ""
+  probes:
+    enabled: false
+  lifecyclePreStop: false
+  nodeSelector: {}
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+terminal:
+  enabled: false
+diskCleanup:
+  enabled: false
+networkPolicy:
+  enabled: false
+cloudflare:
+  domain: eugenechen-hermes.woowtech.io
+  ingress:
+    enabled: false
+rbac:
+  enabled: false
