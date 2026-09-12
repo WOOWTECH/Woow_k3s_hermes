@@ -24,13 +24,15 @@ instance: hermes
 cloudflare:
   domain: woowtech-hermes.woowtech.io
 
+# NOTE: this instance runs the agent container ONLY — there is no webui
+# sidecar, so nothing listens on 8787 here (verified: an in-cluster call to
+# localhost:8787 in the agent container gets no response, while cindytech1,
+# which does have the sidecar, answers 302). Do NOT set service.webuiPort for
+# this instance: it renders a Service whose endpoint can never serve.
+# woowtech-hermes.woowtech.io is routed by the tunnel to hermes-webui-svc:8787
+# and therefore 502s. That route is stale and must be removed or repointed in
+# the Cloudflare dashboard — it cannot be fixed from inside the cluster.
 hermes:
-  # The Cloudflare tunnel routes woowtech-hermes.woowtech.io to <instance>-webui-svc:8787.
-  # Without this Service that hostname returns 502 even though the webui
-  # sidecar is healthy (proved with an in-cluster call to localhost:8787).
-  # Merges with the chart's service defaults; gateway/dashboard ports unchanged.
-  service:
-    webuiPort: 8787
 
   # Live name, not the chart default (<instance>-agent-sa): renaming the
   # ServiceAccount would change the pod template and restart the agent.
