@@ -33,6 +33,10 @@ hermes:
   serviceAccount:
     create: false
   podSecurityContext: {}
+  probes:
+    enabled: false
+  configMap:
+    enabled: false
   sharedVolumes:
     enabled: false
   persistence:
@@ -97,6 +101,16 @@ hermes:
       env:
         - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
         - {name: HERMES_WEBUI_GATEWAY_USE_RUNS_API, value: "1"}
+        # The live container hardcodes the real MiniMax API key as a
+        # literal string inside its `args` shell script instead of reading
+        # it from a Secret (the `args` block below uses ${MINIMAX_API_KEY}
+        # instead of that literal, on purpose — never commit a real key).
+        # This container has 0 running replicas today (hermes.replicaCount:
+        # 0 above), so unlike everywhere else in this chart, this specific
+        # fix costs nothing on a real takeover: there is no running pod to
+        # restart.
+        - name: MINIMAX_API_KEY
+          valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
         - name: HERMES_WEBUI_GATEWAY_API_KEY
           valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
         - {name: HERMES_WEBUI_RUNNER_BASE_URL, value: http://localhost:8642}
@@ -217,7 +231,9 @@ cloudflared:
   probes:
     enabled: false
   lifecyclePreStop: false
-  nodeSelector: {}
+  # null (not {}): {} would deep-merge and leave the chart default
+  # nodeSelector in place; null is required to actually clear it.
+  nodeSelector: null
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {cpu: 100m, memory: 128Mi}

@@ -1,4 +1,5 @@
 {{- $instance := include "hermes.instance" . }}
+{{- if .Values.hermes.configMap.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,6 +9,7 @@ data:
   {{- range $key, $value := .Values.hermes.config }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
+{{- end }}
 {{- if .Values.hermes.toolsetsOverride.enabled }}
 ---
 apiVersion: v1

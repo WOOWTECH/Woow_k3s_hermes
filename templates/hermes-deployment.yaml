@@ -57,6 +57,7 @@ spec:
             exec:
               command: ["sh", "-c", {{ $h.lifecyclePostStart | quote }}]
         {{- end }}
+        {{- if $h.probes.enabled }}
         readinessProbe:
           tcpSocket: {port: 8642}
           initialDelaySeconds: 10
@@ -67,6 +68,7 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 30
           failureThreshold: 5
+        {{- end }}
         resources:
           {{- toYaml $h.resources | nindent 10 }}
         {{- with $h.containerSecurityContext }}

@@ -95,6 +95,15 @@ hermes:
   # component (the live Service never had it, only the Deployment did).
   svcExtraLabels:
     app.kubernetes.io/part-of: hermes
+  # Agent container TCP readiness/liveness probes on :8642. Off on one live
+  # instance (eugenechen-hermes) that predates them.
+  probes:
+    enabled: true
+  # Render the <instance>-config ConfigMap. Off on one live instance
+  # (eugenechen-hermes) that doesn't have one at all — its env/args are all
+  # inline instead of reading from a ConfigMap.
+  configMap:
+    enabled: true
   podSecurityContext:
     fsGroup: 0
   containerSecurityContext:
