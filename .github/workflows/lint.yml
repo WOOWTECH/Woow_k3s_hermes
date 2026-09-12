@@ -42,6 +42,9 @@ jobs:
           helm template cindytech-cindytech1 . -n cindytech \
             -f deploy/woow-k3s/cindytech-cindytech1.yaml                        > /tmp/r/cindytech1-instance.yaml
           helm template hermes . -n hermes --set instance=hermes                > /tmp/r/default-ns.yaml
+          # namespace.name != release namespace: the only combination that renders
+          # templates/namespace.yaml (empty name follows -n and is skipped by design).
+          helm template hermes . -n hermes --set instance=hermes --set namespace.name=other-ns > /tmp/r/other-ns.yaml
           helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" > /tmp/r/secrets.yaml
           helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set keepOnUninstall=false > /tmp/r/no-keep.yaml
           helm template hermes . -n hermes --set instance=hermes \
