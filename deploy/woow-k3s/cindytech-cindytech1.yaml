@@ -1,0 +1,194 @@
+# Instance values for the live "cindytech1" release in namespace
+# "cindytech". Shares the namespace with an unrelated Odoo/n8n stack for
+# the same customer — cloudflared, ingress, terminal, disk-cleanup and
+# networkPolicy all stay OFF here on purpose: cindytech's Cloudflare Tunnel
+# belongs to that Odoo stack, not to this Hermes instance, and none of the
+# other extras exist on this instance today.
+#
+#   helm upgrade --install cindytech-cindytech1 . -n cindytech \
+#     -f deploy/woow-k3s/cindytech-cindytech1.yaml --take-ownership
+
+instance: cindytech1
+
+namespace:
+  name: cindytech
+
+secrets:
+  create: false
+
+hermes:
+  image:
+    repository: jcr-prod.woowtech.io/woow-paas-docker-local/hermes-agent-custom
+    tag: aorus-20260727
+    pullPolicy: IfNotPresent
+  extraLabels: {}
+  imagePullSecrets:
+    - name: jfrog-registry
+  persistence:
+    claimName: cindytech1-data
+    storageClassName: longhorn
+    size: 5Gi
+  env:
+    - {name: HERMES_DASHBOARD, value: "1"}
+    - {name: HERMES_DASHBOARD_INSECURE, value: "1"}
+    - {name: HERMES_DASHBOARD_TUI, value: "1"}
+    - {name: HERMES_UID, value: "1000"}
+    - {name: HERMES_GID, value: "1000"}
+    - {name: API_SERVER_ENABLED, value: "true"}
+    - {name: API_SERVER_HOST, value: "0.0.0.0"}
+    - name: API_SERVER_KEY
+      valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: API_SERVER_KEY}}
+    - {name: API_SERVER_CORS_ORIGINS, value: "*"}
+    - {name: GATEWAY_ALLOW_ALL_USERS, value: "true"}
+    - name: MINIMAX_API_KEY
+      valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: MINIMAX_API_KEY}}
+    - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+    - {name: PATH, value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/google-cloud-sdk/bin"}
+    - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
+  dashboardAuth:
+    enabled: false
+  lifecyclePostStart: "rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null || true"
+  # Legacy hermes-webui sidecar, same era as eugenechen-hermes but with its
+  # own icon-replacement postStart hook and full volume mounts.
+  extraContainers:
+    - name: hermes-webui
+      image: ghcr.io/nesquena/hermes-webui:latest
+      imagePullPolicy: Always
+      tty: true
+      command: ["sh", "-c"]
+      args:
+        - |
+          mkdir -p /home/hermeswebui/.hermes
+          echo "MINIMAX_API_KEY=${MINIMAX_API_KEY}" > /home/hermeswebui/.hermes/.env
+          chmod 644 /home/hermeswebui/.hermes/.env
+          for i in $(seq 1 90); do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8642/ 2>/dev/null)
+            [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ] && break
+            sleep 2
+          done
+          (while true; do
+            NOW=$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")
+            printf '{"gateway_state":"running","updated_at":"%s","pid":1,"platform":"hermes-agent","version":"0.13.0"}\n' "$NOW" > /home/hermeswebui/.hermes/gateway_state.json 2>/dev/null
+            sleep 25
+          done) &
+          rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
+          if [ -f /hermeswebui_init.bash ]; then
+            sed -i 's/chmod 700 "$itdir"/chmod 755 "$itdir"/' /hermeswebui_init.bash 2>/dev/null
+            sed -i '/cd \/app; python server.py/i test -f /home/hermeswebui/.hermes/replace_icons.sh && sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true' /hermeswebui_init.bash 2>/dev/null
+            exec /hermeswebui_init.bash
+          else
+            echo "WebUI init script not found, sleeping..."
+            sleep infinity
+          fi
+      lifecycle:
+        postStart:
+          exec:
+            command: ["sh", "-c", "sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true"]
+      env:
+        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
+        - name: HERMES_WEBUI_GATEWAY_API_KEY
+          valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: API_SERVER_KEY}}
+        - name: MINIMAX_API_KEY
+          valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: MINIMAX_API_KEY}}
+        - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+        - {name: LD_LIBRARY_PATH, value: /opt/shared-tools/lib}
+        - {name: PATH, value: "/opt/shared-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+        - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
+        - {name: HERMES_WEBUI_PORT, value: "8787"}
+        - {name: HERMES_WEBUI_STATE_DIR, value: /home/hermeswebui/.hermes/webui}
+        - {name: HERMES_HOME, value: /home/hermeswebui/.hermes}
+        - {name: WANTED_UID, value: "1000"}
+        - {name: WANTED_GID, value: "1000"}
+        - {name: GATEWAY_HEALTH_URL, value: http://localhost:8642}
+        - {name: HERMES_WEBUI_PASSWORD, value: admin}
+      ports:
+        - {containerPort: 8787, name: http, protocol: TCP}
+      readinessProbe:
+        tcpSocket: {port: 8787}
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        failureThreshold: 12
+      livenessProbe:
+        tcpSocket: {port: 8787}
+        initialDelaySeconds: 90
+        periodSeconds: 30
+        failureThreshold: 5
+      resources:
+        requests: {cpu: 500m, memory: 512Mi}
+        limits: {cpu: "2", memory: 2Gi}
+      volumeMounts:
+        - {name: hermes-data, mountPath: /home/hermeswebui/.hermes}
+        - {name: playwright-shared, mountPath: /opt/playwright-browsers}
+        - {name: tools-shared, mountPath: /opt/shared-tools}
+  # cindytech1-webui-svc points at this same Deployment's pods
+  # (selector app: cindytech1) — kept in this release rather than left an
+  # orphan, even though it wasn't in the task's headline component list.
+  extraServices:
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: cindytech1-webui-svc
+        namespace: cindytech
+      spec:
+        type: ClusterIP
+        selector: {app: cindytech1}
+        ports:
+          - {name: http, port: 8787, targetPort: 8787, protocol: TCP}
+  config:
+    HERMES_DOMAIN: cindytech1-hermes.woowtech.io
+    HERMES_BASE_URL: https://cindytech1-hermes.woowtech.io
+    HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
+    POSTGRES_HOST: cindytech1-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: cindytech1-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+
+postgresql:
+  extraLabels: {}
+  containerPortName: ""
+  svcPortName: postgresql
+  persistence:
+    claimName: cindytech1-postgresql-pvc
+    storageClassName: local-path
+    size: 10Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  env:
+    - name: POSTGRES_DB
+      valueFrom: {configMapKeyRef: {name: cindytech1-config, key: POSTGRES_DB}}
+    - name: POSTGRES_USER
+      valueFrom: {configMapKeyRef: {name: cindytech1-config, key: POSTGRES_USER}}
+    - name: POSTGRES_PASSWORD
+      valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: POSTGRES_PASSWORD}}
+    - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+
+redis:
+  extraLabels: {}
+  containerPortName: ""
+  svcPortName: redis
+  persistence:
+    claimName: cindytech1-redis-pvc
+    storageClassName: local-path
+    size: 5Gi
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 256Mi}
+
+cloudflared:
+  enabled: false # belongs to the customer's Odoo stack in this namespace.
+terminal:
+  enabled: false
+diskCleanup:
+  enabled: false
+networkPolicy:
+  enabled: false
+cloudflare:
+  ingress:
+    enabled: false
+rbac:
+  enabled: false
