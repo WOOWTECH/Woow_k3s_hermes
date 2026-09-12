@@ -1,32 +1,28 @@
+{{- $instance := include "hermes.instance" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: cf-config
-  namespace: {{ .Values.namespace.name }}
-  labels:
-    app.kubernetes.io/part-of: hermes
-data:
-  CF_ACCOUNT_ID: {{ .Values.cloudflare.accountId | quote }}
-  CF_TUNNEL_ID: {{ .Values.cloudflare.tunnelId | quote }}
-  DOMAIN: {{ .Values.cloudflare.domain | quote }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: hermes-config
-  namespace: {{ .Values.namespace.name }}
-  labels:
-    app.kubernetes.io/part-of: hermes
+  name: {{ $instance }}-config
+  namespace: {{ include "hermes.ns" . }}
 data:
   {{- range $key, $value := .Values.hermes.config }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
+{{- if .Values.hermes.toolsetsOverride.enabled }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: hermes-toolsets-override
-  namespace: {{ .Values.namespace.name }}
-  labels:
-    app.kubernetes.io/part-of: hermes
-data: {}
+  name: {{ $instance }}-toolsets-override
+  namespace: {{ include "hermes.ns" . }}
+data:
+  {{- range $key, $value := .Values.hermes.toolsetsOverride.data }}
+  {{ $key }}: |
+    {{- $value | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- /*
+No cf-config ConfigMap: the cloudflared Deployment reads TUNNEL_TOKEN
+straight from the cf-secrets Secret. None of the three live instances have
+a cf-config object, so this chart doesn't render one either.
+*/ -}}

@@ -1,0 +1,52 @@
+{{- /*
+Read-only `helm test` smoke pod: proves this release's own Services are
+reachable and, when enabled, that Postgres/Redis actually answer. Never
+writes anything.
+*/ -}}
+{{- if .Values.tests.enabled }}
+{{- $instance := include "hermes.instance" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $instance }}-smoke-test
+  namespace: {{ include "hermes.ns" . }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: "busybox:1.36"
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          fail=0
+          check() {
+            echo "-- checking $1:$2 --"
+            if nc -z -w5 "$1" "$2"; then
+              echo "OK: $1:$2 reachable"
+            else
+              echo "FAIL: $1:$2 unreachable"
+              fail=1
+            fi
+          }
+          check {{ $instance }}-agent-svc {{ .Values.hermes.service.gatewayPort }}
+          check {{ $instance }}-agent-svc {{ .Values.hermes.service.dashboardPort }}
+          {{- if .Values.postgresql.enabled }}
+          check {{ $instance }}-postgresql-svc {{ .Values.postgresql.service.port }}
+          {{- end }}
+          {{- if .Values.redis.enabled }}
+          check {{ $instance }}-redis-svc {{ .Values.redis.service.port }}
+          {{- end }}
+          {{- if .Values.terminal.enabled }}
+          check {{ $instance }}-terminal-svc {{ .Values.terminal.service.port }}
+          {{- end }}
+          if [ "$fail" -ne 0 ]; then
+            echo "SMOKE TEST FAILED"
+            exit 1
+          fi
+          echo "SMOKE TEST PASSED"
+{{- end }}

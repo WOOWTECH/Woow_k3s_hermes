@@ -1,9 +1,10 @@
 {{- if .Values.cloudflare.ingress.enabled }}
+{{- $instance := include "hermes.instance" . }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: hermes-ingress
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-ingress
+  namespace: {{ include "hermes.ns" . }}
   labels:
     app.kubernetes.io/part-of: hermes
   annotations:
@@ -17,7 +18,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: hermes-agent-svc
+                name: {{ $instance }}-agent-svc
                 port:
                   number: {{ .Values.hermes.service.gatewayPort }}
 {{- end }}

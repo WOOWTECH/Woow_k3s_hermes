@@ -1,81 +1,115 @@
 {{- if .Values.redis.enabled }}
+{{- $instance := include "hermes.instance" . }}
+{{- $r := .Values.redis }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hermes-redis
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-redis
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $r.renderLabels }}
   labels:
-    app: hermes-redis
-    app.kubernetes.io/component: cache
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}-redis
+    {{- with $r.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
-  replicas: {{ .Values.redis.replicaCount }}
+  replicas: {{ $r.replicaCount }}
   strategy:
-    type: {{ .Values.redis.strategy }}
+    {{- toYaml $r.strategy | nindent 4 }}
   selector:
     matchLabels:
-      app: hermes-redis
+      app: {{ $instance }}-redis
   template:
     metadata:
       labels:
-        app: hermes-redis
+        app: {{ $instance }}-redis
     spec:
       containers:
         - name: redis
-          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
-          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          image: "{{ $r.image.repository }}:{{ $r.image.tag }}"
+          imagePullPolicy: {{ $r.image.pullPolicy }}
           ports:
             - containerPort: 6379
-              name: redis
+              {{- if $r.containerPortName }}
+              name: {{ $r.containerPortName }}
+              {{- end }}
+              protocol: TCP
+          {{- if $r.commandOverride.enabled }}
           command:
             - redis-server
             - --appendonly
             - "yes"
             - --maxmemory
-            - "256mb"
+            - {{ $r.commandOverride.maxmemory | quote }}
             - --maxmemory-policy
-            - "allkeys-lru"
+            - {{ $r.commandOverride.maxmemoryPolicy | quote }}
+          {{- end }}
+          {{- if $r.persistence.enabled }}
           volumeMounts:
             - name: redis-data
               mountPath: /data
+          {{- end }}
+          {{- if $r.probes.enabled }}
           readinessProbe:
             exec:
-              command:
-                - redis-cli
-                - ping
+              command: [redis-cli, ping]
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
             exec:
-              command:
-                - redis-cli
-                - ping
+              command: [redis-cli, ping]
             initialDelaySeconds: 15
             periodSeconds: 30
             failureThreshold: 3
+          {{- end }}
           resources:
-            {{- toYaml .Values.redis.resources | nindent 12 }}
+            {{- toYaml $r.resources | nindent 12 }}
+      {{- if $r.persistence.enabled }}
       volumes:
         - name: redis-data
           persistentVolumeClaim:
-            claimName: {{ .Values.redis.persistence.claimName }}
+            claimName: {{ $r.persistence.claimName }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: hermes-redis-svc
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-redis-svc
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $r.renderLabels }}
   labels:
-    app: hermes-redis
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}-redis
+    {{- with $r.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
   selector:
-    app: hermes-redis
+    app: {{ $instance }}-redis
   ports:
     - protocol: TCP
-      port: {{ .Values.redis.service.port }}
+      port: {{ $r.service.port }}
       targetPort: 6379
-      name: redis
-  type: {{ .Values.redis.service.type }}
+      {{- if $r.svcPortName }}
+      name: {{ $r.svcPortName }}
+      {{- end }}
+  type: {{ $r.service.type }}
+{{- if $r.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $r.persistence.claimName }}
+  namespace: {{ include "hermes.ns" . }}
+  {{- include "hermes.keepAnnotations" . | nindent 2 }}
+spec:
+  storageClassName: {{ $r.persistence.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $r.persistence.size }}
+{{- end }}
 {{- end }}

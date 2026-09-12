@@ -1,16 +1,16 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ .Values.hermes.serviceAccountName }}
-  namespace: {{ .Values.namespace.name }}
-  labels:
-    app: hermes-agent
-    app.kubernetes.io/part-of: hermes
----
+{{- /*
+Opt-in RBAC for the agent ServiceAccount. Off by default: see the comment on
+rbac.enabled in values.yaml — none of the three live instances have this.
+Cluster-scoped names are instance-prefixed so two releases (in the same or
+different namespaces) never collide on one ClusterRole/ClusterRoleBinding.
+*/ -}}
+{{- if .Values.rbac.enabled }}
+{{- $instance := include "hermes.instance" . }}
+{{- $sa := required "hermes.serviceAccountName is required when rbac.enabled=true" .Values.hermes.serviceAccountName }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Values.namespace.name }}-agent-cluster-reader
+  name: {{ $instance }}-agent-cluster-reader
 rules:
   - apiGroups: [""]
     resources: ["pods", "services", "endpoints", "namespaces", "nodes",
@@ -32,21 +32,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Values.namespace.name }}-agent-cluster-reader-binding
+  name: {{ $instance }}-agent-cluster-reader-binding
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.hermes.serviceAccountName }}
-    namespace: {{ .Values.namespace.name }}
+    name: {{ $sa }}
+    namespace: {{ include "hermes.ns" . }}
 roleRef:
   kind: ClusterRole
-  name: {{ .Values.namespace.name }}-agent-cluster-reader
+  name: {{ $instance }}-agent-cluster-reader
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: hermes-agent-ns-writer
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-agent-ns-writer
+  namespace: {{ include "hermes.ns" . }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -73,13 +73,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: hermes-agent-ns-writer-binding
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-agent-ns-writer-binding
+  namespace: {{ include "hermes.ns" . }}
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.hermes.serviceAccountName }}
-    namespace: {{ .Values.namespace.name }}
+    name: {{ $sa }}
+    namespace: {{ include "hermes.ns" . }}
 roleRef:
   kind: Role
-  name: hermes-agent-ns-writer
+  name: {{ $instance }}-agent-ns-writer
   apiGroup: rbac.authorization.k8s.io
+{{- end }}

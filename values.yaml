@@ -1,56 +1,100 @@
 # =============================================================
-# WoowTech Hermes Agent — Helm chart values
-# Defaults match the original Kustomize/sed-templated K3s manifests.
+# WoowTech Hermes Agent — Helm chart values.
+#
+# ONE release == ONE live Hermes instance. Several releases can share one
+# namespace: object names are derived from `instance` (see templates/
+# _helpers.tpl), not from the Helm release name, so they can match whatever
+# the instance was originally called (e.g. "hermes", "cindytech1").
+#
+# These defaults reproduce the most complete live instance — "hermes" in
+# namespace "hermes" — as closely as a generic default can. Every live
+# instance restates its own values in deploy/woow-k3s/<namespace>-<instance>.yaml;
+# read those alongside this file to see what actually varies between
+# real-world Hermes deployments (image, sidecar shape, persistence, RBAC...).
 # =============================================================
 
+# The literal name prefix for every object this release owns:
+# Deployment/Service "hermes", "hermes-postgresql", "hermes-redis", PVC
+# "hermes-postgresql-pvc", etc. REQUIRED — there is no default, on purpose:
+# two releases in one namespace must never accidentally collide on "hermes".
+instance: ""
+
 namespace:
-  # Create the namespace as part of `helm install`. Set false if the
-  # namespace is managed externally (e.g. by ArgoCD or a platform op).
+  # Render the Namespace object. A namespace equal to the release namespace
+  # (`-n`) is never rendered (see templates/namespace.yaml) so `helm
+  # uninstall` can never delete the namespace the release lives in — create
+  # it with `--create-namespace` instead.
   create: true
-  # Namespace name. Original manifests used "hermes".
   name: hermes
 
-# Cloudflare Tunnel + public domain — templated into cf-config, hermes-config,
-# ingress, and the cloudflared secret. Leave placeholders when running
-# `helm template` for offline validation; substitute at install time.
-cloudflare:
-  domain: __DOMAIN__
-  accountId: __CF_ACCOUNT_ID__
-  tunnelId: __CF_TUNNEL_ID__
-  ingress:
-    # Optional Traefik ingress for direct in-cluster access on /api.
-    enabled: true
-    className: traefik
+# Add `helm.sh/resource-policy: keep` to Namespaces, PVCs and chart-created
+# Secrets, so `helm uninstall` never deletes data.
+keepOnUninstall: true
+
+# Default StorageClass for every PVC in this release. Individual PVCs may
+# override it (see hermes.persistence.storageClassName etc.)
+storageClassName: longhorn
 
 secrets:
-  # Rendered into `hermes-secrets` (agent Deployment references these keys).
-  API_SERVER_KEY: changeme
-  MINIMAX_API_KEY: changeme
-  POSTGRES_PASSWORD: changeme
-  # ttyd browser terminal (optional, see terminal.enabled below).
-  TTYD_PASSWORD: changeme
-  # Rendered into `cf-secrets` for the cloudflared sidecar.
-  CF_API_TOKEN: changeme
-  CF_TUNNEL_TOKEN: changeme
-
-# Dashboard basic-auth credentials (baked directly into the agent env).
-dashboard:
-  username: admin
-  password: changeme
-  # Public URL for MCP OAuth callbacks. Leave empty to omit.
-  publicUrl: ""
+  # false (default): the Secrets below already exist out of band (created
+  #   from examples/secrets.example.yaml) and this chart never renders or
+  #   reads them — it only references their name/key in env/volumes. An
+  #   upgrade can therefore never overwrite a real key with an empty one.
+  # true: render `<instance>-secrets` (and `cf-secrets` if cloudflared is
+  #   enabled) from the values below. Fresh installs and CI only.
+  create: false
+  API_SERVER_KEY: ""
+  MINIMAX_API_KEY: ""
+  POSTGRES_PASSWORD: ""
+  # Only rendered while terminal.enabled=true.
+  TTYD_PASSWORD: ""
+  # cf-secrets — only rendered while cloudflared.enabled=true. Not
+  # instance-scoped: one Cloudflare Tunnel per namespace (see cloudflared
+  # section below).
+  CF_API_TOKEN: ""
+  CF_TUNNEL_TOKEN: ""
+  # Extra keys merged into <instance>-secrets, e.g. GLM_API_KEY,
+  # MCP_BROWSERLESS_MCP_API_KEY (present on some live instances, unused by
+  # the templates in this chart, but real integrations may read them).
+  extraEnv: {}
 
 hermes:
   image:
     repository: nousresearch/hermes-agent
     tag: latest
-    # Original manifest explicitly set `Always` — retained here so the
-    # default Helm behavior matches the raw-manifest behavior when tag=latest.
+    # The original manifests used :latest with no explicit pullPolicy, i.e.
+    # the implicit `Always`. Kept explicit here for clarity; behavior is
+    # identical.
     pullPolicy: Always
   replicaCount: 1
-  serviceAccountName: hermes-agent-sa
-  # Deployment strategy — SQLite / single-writer PVC requires Recreate.
+  # SQLite / single-writer PVC semantics require Recreate, not RollingUpdate.
   strategy: Recreate
+  # ServiceAccount the agent pod runs as. Empty = let Kubernetes use
+  # "default" (this is what the disabled eugenechen-hermes instance does).
+  serviceAccountName: hermes-agent-sa
+  serviceAccount:
+    # Render the bare ServiceAccount object named `hermes.serviceAccountName`.
+    # No RBAC is attached unless rbac.enabled=true (see below).
+    create: true
+  imagePullSecrets: []
+  # Render a `labels:` block (app: <instance>, plus extraLabels) on the
+  # agent Deployment/Service's own metadata — never on the selector or pod
+  # template, that would restart every existing pod under a different
+  # owner-selector. One live instance (eugenechen-hermes) predates labels
+  # entirely and has none at all; set this false to match it exactly.
+  renderLabels: true
+  # Extra labels merged in alongside `app: <instance>` when renderLabels is
+  # true. The "hermes" instance in namespace "hermes" is the only live
+  # instance carrying these; others (when renderLabels=true) have bare
+  # `app: <instance>` only.
+  extraLabels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: hermes
+  podSecurityContext:
+    fsGroup: 0
+  containerSecurityContext:
+    runAsUser: 0
+    runAsGroup: 0
   service:
     type: ClusterIP
     gatewayPort: 8642
@@ -65,21 +109,88 @@ hermes:
     limits:
       cpu: "2"
       memory: 6Gi
-  securityContext:
-    fsGroup: 0
-  containerSecurityContext:
-    runAsUser: 0
-    runAsGroup: 0
   persistence:
-    # PVC name retained (hermes-webui-data) for backward compatibility
-    # with existing Longhorn volumes from the pre-single-container era.
+    # PVC name retained (hermes-webui-data) on the "hermes" instance for
+    # backward compatibility with pre-existing Longhorn volumes from the
+    # sidecar era. New instances default to "<instance>-data".
     claimName: hermes-webui-data
     storageClassName: longhorn
-    size: 5Gi
+    size: 20Gi
+  # /shared-pw and /shared-tools emptyDirs, mounted by the agent container
+  # (and, when present, extraContainers) for Playwright/tool sharing. One
+  # live instance (eugenechen-hermes, replicas 0) predates these and has
+  # neither the volumes nor the mounts.
+  sharedVolumes:
+    enabled: true
+  # Raw env list for the hermes-agent container (rendered as-is under
+  # `env:`). A list, not a map, so order and duplicate-name quirks in the
+  # original manifests can be reproduced exactly where it matters.
+  env:
+    - {name: HERMES_DASHBOARD, value: "1"}
+    - {name: HERMES_DASHBOARD_INSECURE, value: "1"}
+    - {name: HERMES_UID, value: "1000"}
+    - {name: HERMES_GID, value: "1000"}
+    - {name: API_SERVER_ENABLED, value: "true"}
+    - {name: API_SERVER_HOST, value: "0.0.0.0"}
+    - name: API_SERVER_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+    - {name: API_SERVER_CORS_ORIGINS, value: "*"}
+    - {name: GATEWAY_ALLOW_ALL_USERS, value: "true"}
+    - name: MINIMAX_API_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
+    - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+    - {name: PATH, value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/google-cloud-sdk/bin"}
+    - {name: HERMES_DASHBOARD_TUI, value: "1"}
+    - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
+    - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
+  # Shell script run as the container's postStart lifecycle hook. Empty
+  # string omits the lifecycle block entirely.
+  lifecyclePostStart: >-
+    rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null;
+    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes 2>/dev/null;
+    rm -rf /opt/hermes/skills/apple /opt/hermes/skills/gaming
+    /opt/hermes/skills/email /opt/hermes/skills/social-media
+    /opt/hermes/skills/yuanbao /opt/hermes/skills/media/heartmula
+    /opt/hermes/skills/media/songsee /opt/hermes/skills/media/spotify
+    /opt/hermes/skills/media/youtube-content
+    /opt/hermes/skills/smart-home/openhue 2>/dev/null;
+    SITE=$(/opt/hermes/.venv/bin/python3 -c "import site;print(site.getsitepackages()[0])" 2>/dev/null)
+    && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true;
+    curl -sfL -o /opt/data/officecli "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.135/officecli-linux-x64" 2>/dev/null
+    && chmod +x /opt/data/officecli && ln -sf /opt/data/officecli /usr/local/bin/officecli 2>/dev/null || true;
+    [ -x /opt/data/officecli ] && cp -f /opt/data/officecli /shared-tools/officecli 2>/dev/null
+    && chmod +x /shared-tools/officecli 2>/dev/null || true;
+    test -f /opt/data/mcp_patch.py && /opt/hermes/.venv/bin/python3 /opt/data/mcp_patch.py 2>/dev/null || true;
+    test -f /opt/data/install_video_pipeline.sh && bash /opt/data/install_video_pipeline.sh >/opt/data/install_video_pipeline.log 2>&1 || true
+  # HERMES_DASHBOARD_BASIC_AUTH_USERNAME/PASSWORD, appended after `env`
+  # above. Split out on purpose (not in the raw `env` list): the live
+  # password is a plain env value, not a Secret, on every instance that has
+  # it — never commit its real value here. Committed instance values files
+  # leave `password` blank and document supplying the real one out of band
+  # (e.g. `--set-string hermes.dashboardAuth.password=...`) at apply time.
+  dashboardAuth:
+    enabled: true
+    username: admin
+    password: ""
+  # Extra sidecar containers, appended verbatim (rendered with `toYaml`) —
+  # e.g. the legacy hermes-webui sidecar still running on two older
+  # instances. Empty on new/current-generation instances.
+  extraContainers: []
+  # Extra Services, appended verbatim as whole `Service` documents (rendered
+  # with `toYaml` under `---`) — e.g. the NodePort dashboard/webui Services
+  # a couple of older instances still expose.
+  extraServices: []
+  # ConfigMap `<instance>-toolsets-override`. Off by default: only one live
+  # instance carries real data here (a one-off `apply-toolsets.sh` helper);
+  # everywhere else it doesn't exist at all.
+  toolsetsOverride:
+    enabled: false
+    data: {}
   config:
     HERMES_DOMAIN: __DOMAIN__
     HERMES_BASE_URL: https://__DOMAIN__
     HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
     POSTGRES_HOST: hermes-postgresql-svc
     POSTGRES_PORT: "5432"
     POSTGRES_DB: hermes
@@ -94,12 +205,34 @@ postgresql:
     repository: postgres
     tag: "15"
     pullPolicy: IfNotPresent
+  # Container name — two live instances call it "postgresql", one (an
+  # older, ephemeral instance) calls it "postgres".
+  containerName: postgresql
   replicaCount: 1
-  strategy: Recreate
+  strategy:
+    type: Recreate
+  # One live instance (eugenechen-hermes, ephemeral/no-persistence) has no
+  # labels at all on this Deployment/Service; set this false to match it.
+  renderLabels: true
+  # Merged in alongside `app: <instance>-postgresql` when renderLabels is
+  # true. The "hermes" instance has this; cindytech1 (renderLabels=true,
+  # bare `app: ...` only) sets it to {}.
+  extraLabels:
+    app.kubernetes.io/part-of: hermes
+  # pg_isready readiness/liveness probes. Off on the one live instance that
+  # predates them.
+  probes:
+    enabled: true
+  # Name given to the 5432 port. Empty = no name field. Only the "hermes"
+  # instance names both; cindytech1 names only the Service port
+  # ("postgresql"), and eugenechen-hermes names neither.
+  containerPortName: postgres
+  svcPortName: postgres
   service:
     type: ClusterIP
     port: 5432
   persistence:
+    enabled: true
     claimName: hermes-postgresql-pvc
     storageClassName: local-path
     size: 10Gi
@@ -110,6 +243,17 @@ postgresql:
     limits:
       cpu: 500m
       memory: 512Mi
+  # Raw env list for the postgres container. Defaults reproduce the
+  # config-map/secret-backed pattern used by the current-generation
+  # instances; override wholesale on legacy instances with inline values.
+  env:
+    - name: POSTGRES_DB
+      valueFrom: {configMapKeyRef: {name: hermes-config, key: POSTGRES_DB}}
+    - name: POSTGRES_USER
+      valueFrom: {configMapKeyRef: {name: hermes-config, key: POSTGRES_USER}}
+    - name: POSTGRES_PASSWORD
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: POSTGRES_PASSWORD}}
+    - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
 
 redis:
   enabled: true
@@ -118,11 +262,29 @@ redis:
     tag: "7-alpine"
     pullPolicy: IfNotPresent
   replicaCount: 1
-  strategy: Recreate
+  strategy:
+    type: Recreate
+  renderLabels: true
+  extraLabels:
+    app.kubernetes.io/part-of: hermes
+  # `redis-server --appendonly yes ...` command override. Off (bare
+  # `redis-server`, in-memory only) on the one live instance that predates
+  # AOF persistence here.
+  commandOverride:
+    enabled: true
+    maxmemory: 256mb
+    maxmemoryPolicy: allkeys-lru
+  probes:
+    enabled: true
+  # Name given to the 6379 port. Empty = no name field. "hermes" and
+  # cindytech1 both name it "redis"; eugenechen-hermes names neither.
+  containerPortName: redis
+  svcPortName: redis
   service:
     type: ClusterIP
     port: 6379
   persistence:
+    enabled: true
     claimName: hermes-redis-pvc
     storageClassName: local-path
     size: 5Gi
@@ -135,12 +297,33 @@ redis:
       memory: 300Mi
 
 cloudflared:
+  # NOT instance-scoped by name (always "cloudflared" / "cf-secrets"): a
+  # namespace has at most one Cloudflare Tunnel regardless of how many
+  # Hermes instances live in it. A second release enabling this in the same
+  # namespace would collide with the first — leave it disabled there (this
+  # is exactly why cindytech1's release must NOT enable it; its namespace's
+  # tunnel belongs to a different app entirely).
   enabled: true
+  renderLabels: true
+  extraLabels:
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: hermes
   image:
     repository: cloudflare/cloudflared
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicaCount: 1
+  strategy:
+    type: Recreate
+  args: [tunnel, run]
+  # Non-empty = pass the tunnel token as a literal `--token` CLI arg instead
+  # of TUNNEL_TOKEN from cf-secrets (matches how one legacy live instance is
+  # actually configured). NEVER set a real token here in a committed values
+  # file — see deploy/woow-k3s/*.yaml for the documented workaround.
+  tokenArg: ""
+  probes:
+    enabled: true
+  lifecyclePreStop: true
   nodeSelector:
     node-role.kubernetes.io/control-plane: "true"
   resources:
@@ -151,12 +334,26 @@ cloudflared:
       cpu: 200m
       memory: 128Mi
 
-# NetworkPolicy that restricts postgres/redis ingress to the hermes agent.
+cloudflare:
+  # Used only for the Ingress host below; cloudflared itself is configured
+  # purely by cf-secrets (CF_TUNNEL_TOKEN) — no accountId/tunnelId ConfigMap
+  # exists on any live instance.
+  domain: __DOMAIN__
+  ingress:
+    # Traefik ingress for direct in-cluster access on /api. Named
+    # "<instance>-ingress"; only one live instance has it.
+    enabled: true
+    className: traefik
+
+# NetworkPolicy that restricts postgres/redis ingress to this instance's
+# agent pod. Named "<instance>-postgresql-policy" / "<instance>-redis-
+# policy"; only the "hermes" instance in namespace "hermes" has these live.
 networkPolicy:
   enabled: true
 
-# ttyd browser terminal (K3s-only add-on): shell into hermes-agent via
-# kubectl exec in a separate lightweight pod.
+# ttyd browser terminal (K3s-only add-on): shell into the agent pod via
+# `kubectl exec` from a small ttyd pod. Named "<instance>-terminal*"; only
+# the "hermes" instance in namespace "hermes" runs this live.
 terminal:
   enabled: true
   image:
@@ -174,7 +371,9 @@ terminal:
       cpu: 200m
       memory: 256Mi
 
-# Nightly disk-cleanup CronJob for the hermes agent PVC.
+# Nightly disk-cleanup CronJob for the agent PVC. Named
+# "<instance>-disk-cleanup"; only the "hermes" instance in namespace
+# "hermes" runs this live.
 diskCleanup:
   enabled: true
   schedule: "0 3 * * *"
@@ -189,3 +388,20 @@ diskCleanup:
     limits:
       cpu: 200m
       memory: 128Mi
+
+# Cluster/namespace RBAC for the agent ServiceAccount (read cluster
+# objects; patch/scale/exec within its own namespace). OFF by default:
+# NONE of the three live instances actually have this bound today — the
+# agent runs with whatever a bare ServiceAccount gets (nothing extra).
+# This is a genuine capability gap on live (some agent skills expect
+# kubectl access and silently fail without it), tracked as a follow-up;
+# turning it on is safe (it only adds permissions, never restarts a pod)
+# but is left opt-in so a takeover changes nothing about what's live today.
+rbac:
+  enabled: false
+
+# `helm test` smoke pod: TCP-reachability checks against this release's own
+# Services (and pg_isready/redis-cli ping when postgresql/redis are
+# enabled). Read-only.
+tests:
+  enabled: true

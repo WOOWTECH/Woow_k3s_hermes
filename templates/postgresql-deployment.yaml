@@ -1,97 +1,107 @@
 {{- if .Values.postgresql.enabled }}
+{{- $instance := include "hermes.instance" . }}
+{{- $p := .Values.postgresql }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hermes-postgresql
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-postgresql
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $p.renderLabels }}
   labels:
-    app: hermes-postgresql
-    app.kubernetes.io/component: database
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}-postgresql
+    {{- with $p.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
-  replicas: {{ .Values.postgresql.replicaCount }}
+  replicas: {{ $p.replicaCount }}
   strategy:
-    type: {{ .Values.postgresql.strategy }}
+    {{- toYaml $p.strategy | nindent 4 }}
   selector:
     matchLabels:
-      app: hermes-postgresql
+      app: {{ $instance }}-postgresql
   template:
     metadata:
       labels:
-        app: hermes-postgresql
+        app: {{ $instance }}-postgresql
     spec:
       containers:
-        - name: postgresql
-          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
-          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+        - name: {{ $p.containerName }}
+          image: "{{ $p.image.repository }}:{{ $p.image.tag }}"
+          imagePullPolicy: {{ $p.image.pullPolicy }}
           ports:
             - containerPort: 5432
-              name: postgres
+              {{- if $p.containerPortName }}
+              name: {{ $p.containerPortName }}
+              {{- end }}
+              protocol: TCP
           env:
-            - name: POSTGRES_DB
-              valueFrom:
-                configMapKeyRef:
-                  name: hermes-config
-                  key: POSTGRES_DB
-            - name: POSTGRES_USER
-              valueFrom:
-                configMapKeyRef:
-                  name: hermes-config
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-secrets
-                  key: POSTGRES_PASSWORD
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
+            {{- toYaml $p.env | nindent 12 }}
+          {{- if $p.probes.enabled }}
           readinessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - hermes
-                - -d
-                - hermes
+              command: [pg_isready, -U, hermes, -d, hermes]
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 5
           livenessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - hermes
-                - -d
-                - hermes
+              command: [pg_isready, -U, hermes, -d, hermes]
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
+          {{- end }}
           resources:
-            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+            {{- toYaml $p.resources | nindent 12 }}
+          {{- if $p.persistence.enabled }}
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          {{- end }}
+      {{- if $p.persistence.enabled }}
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: {{ .Values.postgresql.persistence.claimName }}
+            claimName: {{ $p.persistence.claimName }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: hermes-postgresql-svc
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-postgresql-svc
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $p.renderLabels }}
   labels:
-    app: hermes-postgresql
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}-postgresql
+    {{- with $p.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
   selector:
-    app: hermes-postgresql
+    app: {{ $instance }}-postgresql
   ports:
     - protocol: TCP
-      port: {{ .Values.postgresql.service.port }}
+      port: {{ $p.service.port }}
       targetPort: 5432
-      name: postgres
-  type: {{ .Values.postgresql.service.type }}
+      {{- if $p.svcPortName }}
+      name: {{ $p.svcPortName }}
+      {{- end }}
+  type: {{ $p.service.type }}
+{{- if $p.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $p.persistence.claimName }}
+  namespace: {{ include "hermes.ns" . }}
+  {{- include "hermes.keepAnnotations" . | nindent 2 }}
+spec:
+  storageClassName: {{ $p.persistence.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $p.persistence.size }}
+{{- end }}
 {{- end }}

@@ -1,12 +1,12 @@
 {{- if .Values.diskCleanup.enabled }}
+{{- $instance := include "hermes.instance" . }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: hermes-disk-cleanup
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-disk-cleanup
+  namespace: {{ include "hermes.ns" . }}
   labels:
-    app: hermes-cleanup
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}-cleanup
 spec:
   schedule: {{ .Values.diskCleanup.schedule | quote }}
   concurrencyPolicy: Forbid
@@ -19,7 +19,7 @@ spec:
       template:
         metadata:
           labels:
-            app: hermes-cleanup
+            app: {{ $instance }}-cleanup
         spec:
           restartPolicy: OnFailure
           affinity:
@@ -27,7 +27,7 @@ spec:
               requiredDuringSchedulingIgnoredDuringExecution:
               - labelSelector:
                   matchLabels:
-                    app: hermes
+                    app: {{ $instance }}
                 topologyKey: kubernetes.io/hostname
           containers:
           - name: cleanup
