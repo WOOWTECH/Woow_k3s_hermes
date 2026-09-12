@@ -10,6 +10,12 @@ kind: Pod
 metadata:
   name: {{ $instance }}-smoke-test
   namespace: {{ include "hermes.ns" . }}
+  labels:
+    # Deliberately NOT `app: <instance>` — that is the agent Service's
+    # selector and this pod would start receiving real traffic. The
+    # NetworkPolicy allows these two labels instead (networkPolicy.allowTests).
+    app.kubernetes.io/component: smoke-test
+    app.kubernetes.io/instance: {{ $instance }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation
@@ -24,14 +30,23 @@ spec:
         - |
           set -eu
           fail=0
+          # Retry: this pod lives for seconds, and the cluster's NetworkPolicy
+          # controller needs a moment to publish its identity to the node that
+          # runs Postgres/Redis. A single-shot nc fails that race.
+          tries={{ .Values.tests.retries }}
           check() {
             echo "-- checking $1:$2 --"
-            if nc -z -w5 "$1" "$2"; then
-              echo "OK: $1:$2 reachable"
-            else
-              echo "FAIL: $1:$2 unreachable"
-              fail=1
-            fi
+            i=1
+            while [ "$i" -le "$tries" ]; do
+              if nc -z -w3 "$1" "$2"; then
+                echo "OK: $1:$2 reachable (attempt $i)"
+                return 0
+              fi
+              i=$((i+1))
+              sleep {{ .Values.tests.retryDelaySeconds }}
+            done
+            echo "FAIL: $1:$2 unreachable after $tries attempts"
+            fail=1
           }
           check {{ $instance }}-agent-svc {{ .Values.hermes.service.gatewayPort }}
           check {{ $instance }}-agent-svc {{ .Values.hermes.service.dashboardPort }}

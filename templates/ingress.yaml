@@ -11,7 +11,7 @@ metadata:
     kubernetes.io/ingress.class: {{ .Values.cloudflare.ingress.className }}
 spec:
   rules:
-    - host: {{ .Values.cloudflare.domain }}
+    - host: {{ include "hermes.subst" (list $ .Values.cloudflare.domain) }}
       http:
         paths:
           - path: /api

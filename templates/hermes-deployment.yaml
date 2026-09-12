@@ -25,7 +25,7 @@ spec:
         app: {{ $instance }}
     spec:
       {{- if $h.serviceAccountName }}
-      serviceAccountName: {{ $h.serviceAccountName }}
+      serviceAccountName: {{ include "hermes.subst" (list $ $h.serviceAccountName) }}
       {{- end }}
       {{- with $h.imagePullSecrets }}
       imagePullSecrets:
@@ -44,21 +44,21 @@ spec:
         - {containerPort: 8642, name: gateway, protocol: TCP}
         - {containerPort: 9119, name: dashboard, protocol: TCP}
         env:
-          {{- toYaml $h.env | nindent 8 }}
+          {{- include "hermes.substYaml" (list $ $h.env) | nindent 8 }}
         {{- if $h.dashboardAuth.enabled }}
         - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-          value: {{ $h.dashboardAuth.username | quote }}
+          value: {{ include "hermes.subst" (list $ $h.dashboardAuth.username) | quote }}
         - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-          value: {{ $h.dashboardAuth.password | quote }}
+          value: {{ include "hermes.subst" (list $ $h.dashboardAuth.password) | quote }}
         {{- end }}
         {{- with $h.extraEnvTail }}
-        {{- toYaml . | nindent 8 }}
+        {{- include "hermes.substYaml" (list $ .) | nindent 8 }}
         {{- end }}
         {{- if $h.lifecyclePostStart }}
         lifecycle:
           postStart:
             exec:
-              command: ["sh", "-c", {{ $h.lifecyclePostStart | quote }}]
+              command: ["sh", "-c", {{ include "hermes.subst" (list $ $h.lifecyclePostStart) | quote }}]
         {{- end }}
         {{- if $h.probes.enabled }}
         readinessProbe:
@@ -85,12 +85,12 @@ spec:
         - {mountPath: /shared-tools, name: tools-shared}
         {{- end }}
       {{- with $h.extraContainers }}
-      {{- toYaml . | nindent 6 }}
+      {{- include "hermes.substYaml" (list $ .) | nindent 6 }}
       {{- end }}
       volumes:
       - name: hermes-data
         persistentVolumeClaim:
-          claimName: {{ $h.persistence.claimName }}
+          claimName: {{ include "hermes.subst" (list $ $h.persistence.claimName) }}
       {{- if $h.sharedVolumes.enabled }}
       - name: playwright-shared
         emptyDir: {}
@@ -129,16 +129,28 @@ spec:
     nodePort: {{ $h.service.dashboardNodePort }}
     {{- end }}
   type: {{ $h.service.type }}
-{{- range $h.extraServices }}
+{{- /*
+Extra Services, rendered verbatim EXCEPT metadata.namespace, which this
+chart always overrides with the release namespace. A namespace baked into a
+values file would survive `-n <test-ns>` and write straight into the live
+namespace during a rehearsal.
+*/ -}}
+{{- range $svc := $h.extraServices }}
 ---
-{{ toYaml . }}
+apiVersion: {{ $svc.apiVersion | default "v1" }}
+kind: {{ $svc.kind | default "Service" }}
+metadata:
+  {{- toYaml (omit ($svc.metadata | default dict) "namespace") | nindent 2 }}
+  namespace: {{ include "hermes.ns" $ }}
+spec:
+  {{- toYaml $svc.spec | nindent 2 }}
 {{- end }}
 {{- if and $h.serviceAccount.create $h.serviceAccountName }}
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ $h.serviceAccountName }}
+  name: {{ include "hermes.subst" (list $ $h.serviceAccountName) }}
   namespace: {{ include "hermes.ns" . }}
 {{- end }}
 ---
@@ -148,7 +160,7 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ $h.persistence.claimName }}
+  name: {{ include "hermes.subst" (list $ $h.persistence.claimName) }}
   namespace: {{ include "hermes.ns" . }}
   {{- include "hermes.keepAnnotations" . | nindent 2 }}
 spec:

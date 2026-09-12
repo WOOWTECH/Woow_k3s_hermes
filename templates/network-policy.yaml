@@ -20,6 +20,7 @@ spec:
         - podSelector:
             matchLabels:
               app: {{ $agentLabel }}
+        {{- include "hermes.netpolTestFrom" . }}
       ports:
         - protocol: TCP
           port: 5432
@@ -44,6 +45,7 @@ spec:
         - podSelector:
             matchLabels:
               app: {{ $agentLabel }}
+        {{- include "hermes.netpolTestFrom" . }}
       ports:
         - protocol: TCP
           port: 6379

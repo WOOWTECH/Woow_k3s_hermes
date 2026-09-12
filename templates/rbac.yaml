@@ -6,7 +6,7 @@ different namespaces) never collide on one ClusterRole/ClusterRoleBinding.
 */ -}}
 {{- if .Values.rbac.enabled }}
 {{- $instance := include "hermes.instance" . }}
-{{- $sa := required "hermes.serviceAccountName is required when rbac.enabled=true" .Values.hermes.serviceAccountName }}
+{{- $sa := include "hermes.subst" (list $ (required "hermes.serviceAccountName is required when rbac.enabled=true" .Values.hermes.serviceAccountName)) }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

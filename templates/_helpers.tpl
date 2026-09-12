@@ -32,3 +32,60 @@ annotations:
   helm.sh/resource-policy: keep
 {{- end -}}
 {{- end -}}
+
+{{- /*
+Placeholder substitution.
+
+Some live objects carry credentials as PLAIN values inside a pod template
+(a dashboard basic-auth password, a webui password, a postgres password set
+as a literal env var, a Cloudflare tunnel token passed as a --token CLI
+arg). Those values must never be committed, but a takeover has to render the
+pod template byte-identical to live or every pod restarts.
+
+So the committed instance values carry `__NAME__` tokens, and the real
+values are supplied at apply time:
+
+    --set-string placeholders.NAME="$VALUE"
+
+`hermes.subst` replaces every `__NAME__` with placeholders.NAME.
+`hermes.substYaml` does the same to a toYaml'd value (env lists, sidecars).
+
+With placeholdersStrict (default true) a leftover `__NAME__` fails the
+render instead of silently shipping a literal "__DASHBOARD_PASSWORD__" as
+someone's password — which, on a takeover, would also restart the pod.
+*/ -}}
+{{- define "hermes.subst" -}}
+{{- $root := index . 0 -}}
+{{- $out := index . 1 | toString -}}
+{{- /* __INSTANCE__ is implicit and always available, so the chart defaults
+       can name this release's own objects (<instance>-secrets, <instance>-
+       config, <instance>-postgresql-svc ...) instead of hardcoding the
+       "hermes" instance's names and breaking every other instance. */ -}}
+{{- $ph := merge (dict "INSTANCE" (include "hermes.instance" $root)) ($root.Values.placeholders | default dict) -}}
+{{- range $k, $v := $ph -}}
+{{- $out = replace (printf "__%s__" $k) ($v | toString) $out -}}
+{{- end -}}
+{{- $left := regexFindAll "__[A-Z0-9_]+__" $out -1 -}}
+{{- if and $left $root.Values.placeholdersStrict -}}
+{{- fail (printf "unsubstituted placeholder(s): %s. Supply each with --set-string placeholders.<NAME>=<value> (see README), or set placeholdersStrict=false to render the token literally." (join ", " ($left | uniq))) -}}
+{{- end -}}
+{{- $out -}}
+{{- end -}}
+
+{{- define "hermes.substYaml" -}}
+{{- include "hermes.subst" (list (index . 0) (toYaml (index . 1))) -}}
+{{- end -}}
+
+{{- /* Extra `from` entry letting the `helm test` smoke pod reach Postgres/
+       Redis. Without it the NetworkPolicy blocks the test and `helm test`
+       can never pass. Rendered only when networkPolicy.allowTests — the one
+       live instance that has these policies sets it false so a takeover
+       leaves the policy byte-identical. */ -}}
+{{- define "hermes.netpolTestFrom" -}}
+{{- if and .Values.networkPolicy.allowTests .Values.tests.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: smoke-test
+              app.kubernetes.io/instance: {{ include "hermes.instance" . }}
+{{- end }}
+{{- end -}}

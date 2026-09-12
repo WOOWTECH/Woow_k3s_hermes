@@ -408,20 +408,17 @@ kubectl -n hermes create secret generic cf-secrets \
   --from-literal=CF_API_TOKEN="<cloudflare-api-token>" \
   --from-literal=CF_TUNNEL_TOKEN="<cloudflare-tunnel-token>"
 
-# 3. 建立 values override —— 實例名稱、網域、Dashboard 密碼
+# 3. 建立 values override —— 實例名稱與這個實例專屬的設定。
+#    不要在裡面寫 `namespace:`：物件位置跟著 `-n` 走，寫死的 namespace
+#    會蓋掉 `-n`、把東西寫到你沒打算寫的地方。
 cat > my-values.yaml <<'EOF'
 instance: hermes
-namespace:
-  name: hermes
-cloudflare:
-  domain: hermes.example.com
-hermes:
-  dashboardAuth:
-    password: "<一組夠強的 Dashboard 密碼>"
 EOF
 
-# 4. 安裝
-helm install hermes . -n hermes -f my-values.yaml
+# 4. 安裝。網域與 Dashboard 密碼是佔位字，必須在這裡帶入，不要寫進 values 檔。
+helm install hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
 
 # 5. 觀察啟動狀態並驗證
 kubectl -n hermes get pods -w
@@ -450,12 +447,15 @@ helm test hermes -n hermes
 | `rbac.enabled` | `false` | 給 agent ServiceAccount 的叢集唯讀 + 命名空間讀寫 RBAC。預設關閉：目前三個正式實例都沒有掛這組權限。 |
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | 只在 `hermes.service.type: NodePort` 時才輸出。 |
 | `tests.enabled` | `true` | `helm test` 煙霧測試 Pod（對本 release 自己的 Service 做 TCP 檢查）。 |
+| `networkPolicy.allowTests` | `true` | 放行 `helm test` 煙霧測試 Pod 連到 Postgres/Redis。不開的話 NetworkPolicy 會擋住測試，`helm test` 永遠不會通過。若某個實例的正式 NetworkPolicy 必須在接手時保持逐位元組相同，就設為 `false`。 |
+| `placeholdersStrict` | `true` | 任何 `__NAME__` 佔位字沒被取代時直接讓 render 失敗（見 [Placeholders](#placeholders寫死在-pod-template-裡的憑證)）。 |
 
 ### 套用前預覽 / diff
 
 ```bash
-helm lint .
-helm template hermes . -f my-values.yaml | less
+helm lint . -f my-values.yaml --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x
+helm template hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x | less
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # 如已安裝 helm-diff plugin
 ```
 
@@ -552,9 +552,12 @@ helm install hermes-tenant-b . -n tenant-a-hermes \
   --set instance=tenant-b -f tenant-b-values.yaml   # 共用 tenant-a-hermes 的 namespace
 ```
 
-每個 values 檔要分別設定自己的 `instance`、`namespace.name`、
-`cloudflare.domain`，若是共用 namespace 的第二個實例還要加上
-`cloudflared.enabled: false`。
+每個 values 檔要分別設定自己的 `instance`，若是共用 namespace 的第二個實例
+還要加上 `cloudflared.enabled: false`。**不要**在 values 檔裡寫
+`namespace:`——物件位置是跟著 `-n` 走的，寫死的 namespace 會蓋掉 `-n`、
+把東西寫到你沒打算寫的地方。網域與 Dashboard 密碼請用
+`--set-string placeholders.DOMAIN=... --set-string placeholders.DASHBOARD_PASSWORD=...`
+在套用當下帶入。
 
 ### 接手既有、手動管理的實例
 
@@ -569,20 +572,46 @@ helm install hermes-tenant-b . -n tenant-a-hermes \
 
 ```bash
 helm upgrade --install hermes . -n hermes \
-  -f deploy/woow-k3s/hermes-hermes.yaml \
-  --set-string hermes.dashboardAuth.password="$(正式環境目前的 Dashboard 密碼)" \
-  --take-ownership
+  -f deploy/woow-k3s/hermes-hermes.yaml --take-ownership \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
 ```
 
-少數幾個實例檔案會刻意把一兩個值留白並附註說明（正式環境的物件裡把密碼或
-tunnel token 直接寫死在明文欄位，而非放進 Secret）——這個 chart 無論如何都
-不會把真實機密值提交進 git。要真正接手這些實例前，請在套用當下透過
-`--set-string` 帶入真實值（直接管線傳入，絕對不要寫成檔案）；哪個欄位需要
-這麼做，檔案裡的註解都有寫。
-
-套用 `deploy/woow-k3s/*.yaml` 會逐欄位重現正式環境現有的物件圖（已用
-`scripts/check-drift.sh` 驗證過），所以 `--take-ownership` 只是接手既有物件，
+套用 `deploy/woow-k3s/*.yaml` 會逐欄位重現正式環境現有的物件圖（可用
+`scripts/check-drift.sh` 驗證），所以 `--take-ownership` 只是接手既有物件，
 不會讓任何東西重新啟動。
+
+### Placeholders：寫死在 pod template 裡的憑證
+
+有幾個正式環境物件把憑證直接以**明文寫在 pod template 裡**，而不是引用
+Secret——Dashboard 的 basic-auth 密碼、舊版 webui 密碼、以字面值設定的
+Postgres 密碼、以 `--token` 參數傳入的 Cloudflare tunnel token。這裡有兩條
+規則會互相衝突：這種值絕對不能提交進 git，但接手時 pod template 又必須逐
+位元組相同，否則每個 pod 都會重啟。
+
+因此提交進 git 的值裡放的是 `__NAME__` 佔位字，真實值在套用當下才帶入
+（直接管線傳入，絕對不要寫成檔案）：
+
+```bash
+--set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+| 佔位字 | 使用者 |
+|--------|--------|
+| `DOMAIN` | chart 預設值裡的 `hermes.config.HERMES_DOMAIN` / `HERMES_BASE_URL` 與 Ingress host |
+| `DASHBOARD_PASSWORD` | `hermes.dashboardAuth.password`（所有開啟 Dashboard 的實例） |
+| `WEBUI_PASSWORD` | 舊版 `hermes-webui` sidecar（`eugenechen-hermes`、`cindytech1`） |
+| `POSTGRES_PASSWORD` | `eugenechen-hermes`，它的 Postgres 密碼是明文環境變數 |
+| `MINIMAX_API_KEY` | `eugenechen-hermes`，它的 webui sidecar 把 key 寫死在 `args` 裡 |
+| `CF_TUNNEL_TOKEN` | `eugenechen-hermes`，它的 tunnel 以 CLI 參數帶 token |
+
+`placeholdersStrict`（預設 `true`）會在任何 `__NAME__` 沒被取代時直接讓
+render 失敗，所以接手時不可能默默把字面上的 `__DASHBOARD_PASSWORD__` 當成
+某人的密碼送上去——那同時也會改到 pod template、害 pod 重啟。每個實例檔案
+的開頭都列出它需要哪些佔位字。
+
+`__INSTANCE__` 是內建佔位字，永遠會被換成 `instance`。chart 預設值就是靠它
+來命名這個 release 自己的物件（`__INSTANCE__-secrets`、`__INSTANCE__-config`、
+`__INSTANCE__-postgresql-svc`），而不是寫死某一個實例的名字。
 
 ---
 

@@ -439,20 +439,19 @@ kubectl -n hermes create secret generic cf-secrets \
   --from-literal=CF_API_TOKEN="<cloudflare-api-token>" \
   --from-literal=CF_TUNNEL_TOKEN="<cloudflare-tunnel-token>"
 
-# 3. Create a values override — instance name, domain, dashboard password
+# 3. Create a values override — instance name and anything else specific
+#    to this instance. Do NOT put `namespace:` in it: object placement
+#    follows `-n`, and a pinned namespace would survive `-n` and write
+#    somewhere you did not mean.
 cat > my-values.yaml <<'EOF'
 instance: hermes
-namespace:
-  name: hermes
-cloudflare:
-  domain: hermes.example.com
-hermes:
-  dashboardAuth:
-    password: "<a-strong-dashboard-password>"
 EOF
 
-# 4. Install
-helm install hermes . -n hermes -f my-values.yaml
+# 4. Install. The domain and the dashboard password are placeholders, so
+#    they must be supplied here — never committed to the values file.
+helm install hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
 
 # 5. Watch it come up, then verify
 kubectl -n hermes get pods -w
@@ -483,12 +482,15 @@ dev clusters or turn everything on for a full production install.
 | `rbac.enabled` | `false` | Cluster-read + namespace-write RBAC for the agent ServiceAccount. Opt-in: none of the current live instances have this bound. |
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | Only rendered when `hermes.service.type: NodePort`. |
 | `tests.enabled` | `true` | The `helm test` smoke pod (TCP checks against this release's own Services). |
+| `networkPolicy.allowTests` | `true` | Lets the `helm test` smoke pod through to Postgres/Redis. Without it the NetworkPolicy blocks the test and `helm test` can never pass. Set `false` on an instance whose live NetworkPolicy must stay byte-identical through a takeover. |
+| `placeholdersStrict` | `true` | Fail the render if any `__NAME__` placeholder is left unsubstituted (see [Placeholders](#placeholders-credentials-that-live-inside-a-pod-template)). |
 
 ### Preview / diff before applying
 
 ```bash
-helm lint .
-helm template hermes . -f my-values.yaml | less
+helm lint . -f my-values.yaml --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x
+helm template hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x | less
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # if helm-diff plugin installed
 ```
 
@@ -602,21 +604,49 @@ already exist as Secrets in the cluster):
 
 ```bash
 helm upgrade --install hermes . -n hermes \
-  -f deploy/woow-k3s/hermes-hermes.yaml \
-  --set-string hermes.dashboardAuth.password="$(the real live dashboard password)" \
-  --take-ownership
+  -f deploy/woow-k3s/hermes-hermes.yaml --take-ownership \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
 ```
 
-A couple of instance files leave one or two values deliberately blank with a
-comment (a plaintext password or tunnel token baked into the *live* object
-instead of a Secret) — the chart will not commit a real secret value under
-any circumstances. Supply the real value via `--set-string` at apply time
-(piped in, never written to a file) before a real takeover of those
-instances; see the comments in the file for exactly which field.
-
 Rendering a `deploy/woow-k3s/*.yaml` file reproduces its live object graph
-field-for-field (verified via `scripts/check-drift.sh`), so `--take-ownership`
+field-for-field (verify with `scripts/check-drift.sh`), so `--take-ownership`
 adopts the existing objects without restarting anything.
+
+### Placeholders: credentials that live inside a pod template
+
+A few live objects carry a credential as a **plain value inside the pod
+template** rather than a Secret reference — a dashboard basic-auth password,
+the legacy webui password, a Postgres password set as a literal env var, a
+Cloudflare tunnel token passed as a `--token` CLI arg. Two rules collide
+there: such a value must never be committed, *and* a takeover has to render
+the pod template byte-identical or every pod restarts.
+
+So the committed values carry `__NAME__` tokens and the real values are
+supplied at apply time — piped in, never written to a file:
+
+```bash
+--set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+| Placeholder | Used by |
+|-------------|---------|
+| `DOMAIN` | `hermes.config.HERMES_DOMAIN` / `HERMES_BASE_URL` and the Ingress host, in the chart defaults |
+| `DASHBOARD_PASSWORD` | `hermes.dashboardAuth.password` (all instances with the dashboard enabled) |
+| `WEBUI_PASSWORD` | the legacy `hermes-webui` sidecar (`eugenechen-hermes`, `cindytech1`) |
+| `POSTGRES_PASSWORD` | `eugenechen-hermes`, whose Postgres password is a plain env var |
+| `MINIMAX_API_KEY` | `eugenechen-hermes`, whose webui sidecar bakes the key into its `args` |
+| `CF_TUNNEL_TOKEN` | `eugenechen-hermes`, whose tunnel takes the token as a CLI arg |
+
+`placeholdersStrict` (default `true`) fails the render if any `__NAME__` is
+left unsubstituted, so a takeover can never silently ship the literal token
+as somebody's password — which would also change the pod template and
+restart the pod. Each instance file's header lists exactly which placeholders
+it needs.
+
+`__INSTANCE__` is implicit and always substituted with `instance`, which is
+how the chart defaults name this release's own objects
+(`__INSTANCE__-secrets`, `__INSTANCE__-config`, `__INSTANCE__-postgresql-svc`)
+instead of hardcoding one instance's names.
 
 ---
 

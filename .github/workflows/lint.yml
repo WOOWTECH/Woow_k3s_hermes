@@ -8,6 +8,9 @@ on:
 env:
   # Dummy values only: exercises templates/secrets.yaml without any real key.
   SECRETS: secrets.create=true,secrets.API_SERVER_KEY=x,secrets.MINIMAX_API_KEY=x,secrets.POSTGRES_PASSWORD=x,secrets.TTYD_PASSWORD=x,secrets.CF_API_TOKEN=x,secrets.CF_TUNNEL_TOKEN=x
+  # Dummy values only: every credential that lives as a plain value inside a
+  # pod template is a __NAME__ placeholder in the committed values.
+  PH: placeholders.DOMAIN=example.invalid,placeholders.DASHBOARD_PASSWORD=x,placeholders.WEBUI_PASSWORD=x,placeholders.POSTGRES_PASSWORD=x,placeholders.MINIMAX_API_KEY=x,placeholders.CF_TUNNEL_TOKEN=x
   KUBECONFORM_VERSION: v0.6.7
   KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
 
@@ -24,40 +27,41 @@ jobs:
 
       - name: helm lint
         run: |
-          helm lint . --set instance=hermes
-          helm lint . -f deploy/woow-k3s/hermes-hermes.yaml
-          helm lint . -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml
-          helm lint . -f deploy/woow-k3s/cindytech-cindytech1.yaml
-          helm lint . --set instance=hermes --set "$SECRETS"
+          helm lint . --set instance=hermes --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/hermes-hermes.yaml --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/cindytech-cindytech1.yaml --set-string "$PH"
+          helm lint . --set instance=hermes --set "$SECRETS" --set-string "$PH"
 
       - name: helm template (every values combination)
         run: |
           mkdir -p /tmp/r
           helm template hermes . -n hermes -f deploy/woow-k3s/hermes-hermes.yaml \
-            --set-string hermes.dashboardAuth.password=x                        > /tmp/r/hermes-instance.yaml
+            --set-string "$PH"                                                  > /tmp/r/hermes-instance.yaml
           helm template eugenechen-hermes-hermes . -n eugenechen-hermes \
             -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml \
-            --set-string 'postgresql.env[2].value=x' --set-string cloudflared.tokenArg=x \
-            --set-string hermes.dashboardAuth.password=x                        > /tmp/r/eugenechen-instance.yaml
+            --set-string "$PH"                                                  > /tmp/r/eugenechen-instance.yaml
           helm template cindytech-cindytech1 . -n cindytech \
-            -f deploy/woow-k3s/cindytech-cindytech1.yaml                        > /tmp/r/cindytech1-instance.yaml
-          helm template hermes . -n hermes --set instance=hermes                > /tmp/r/default-ns.yaml
+            -f deploy/woow-k3s/cindytech-cindytech1.yaml \
+            --set-string "$PH"                                                  > /tmp/r/cindytech1-instance.yaml
+          helm template hermes . -n hermes --set instance=hermes \
+            --set-string "$PH"                                                  > /tmp/r/default-ns.yaml
           # namespace.name != release namespace: the only combination that renders
           # templates/namespace.yaml (empty name follows -n and is skipped by design).
-          helm template hermes . -n hermes --set instance=hermes --set namespace.name=other-ns > /tmp/r/other-ns.yaml
-          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" > /tmp/r/secrets.yaml
-          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set keepOnUninstall=false > /tmp/r/no-keep.yaml
+          helm template hermes . -n hermes --set instance=hermes --set namespace.name=other-ns --set-string "$PH" > /tmp/r/other-ns.yaml
+          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set-string "$PH" > /tmp/r/secrets.yaml
+          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set-string "$PH" --set keepOnUninstall=false > /tmp/r/no-keep.yaml
           helm template hermes . -n hermes --set instance=hermes \
             --set cloudflared.enabled=false,terminal.enabled=false,diskCleanup.enabled=false,networkPolicy.enabled=false,cloudflare.ingress.enabled=false,postgresql.enabled=false,redis.enabled=false \
-                                                                                > /tmp/r/minimal.yaml
+            --set-string "$PH"                                                  > /tmp/r/minimal.yaml
           # The shape of a test install: own namespace, disposable storage, no tunnel.
           helm template ht-test . -n ht-hermes --set instance=ht-test \
             --set storageClassName=longhorn-delete,hermes.persistence.storageClassName=longhorn-delete \
             --set postgresql.persistence.storageClassName=longhorn-delete,redis.persistence.storageClassName=longhorn-delete \
             --set cloudflared.enabled=false,terminal.enabled=false,diskCleanup.enabled=false,networkPolicy.enabled=false,cloudflare.ingress.enabled=false \
-            --set "$SECRETS"                                                    > /tmp/r/test-install.yaml
+            --set "$SECRETS" --set-string "$PH"                                 > /tmp/r/test-install.yaml
           # rbac.enabled is opt-in everywhere; prove it still renders cleanly.
-          helm template hermes . -n hermes --set instance=hermes --set rbac.enabled=true > /tmp/r/rbac-on.yaml
+          helm template hermes . -n hermes --set instance=hermes --set rbac.enabled=true --set-string "$PH" > /tmp/r/rbac-on.yaml
           wc -l /tmp/r/*.yaml
 
       - name: Every template is tracked and renders
@@ -83,6 +87,37 @@ jobs:
             grep -q "^# Source: hermes/$f\$" /tmp/r/*.yaml || { echo "::error::$f never renders"; exit 1; }
           done
           echo "every template is tracked and renders"
+
+      - name: Every rendered object lands in the release namespace
+        run: |
+          # The namespace footgun: a values file that pins a namespace (at the
+          # top level, or inside an extraServices entry) silently survives
+          # `-n <test-ns>` and writes straight into the live namespace during
+          # a takeover rehearsal. Nothing may escape -n.
+          for f in deploy/woow-k3s/*.yaml; do
+            out=$(helm template t . -n SENTINEL -f "$f" --set-string "$PH" \
+                    | grep '^  namespace:' | sort -u)
+            if [ "$out" != "  namespace: SENTINEL" ]; then
+              echo "::error::$f renders objects outside -n:"; echo "$out"; exit 1
+            fi
+            echo "$f: every object in -n"
+          done
+
+      - name: Placeholder guard fires
+        run: |
+          # placeholdersStrict must refuse to ship a literal __NAME__ as
+          # somebody's password (which would also change the pod template and
+          # restart the pod on takeover).
+          if out=$(helm template hermes . -n hermes -f deploy/woow-k3s/hermes-hermes.yaml 2>&1); then
+            echo "::error::a missing placeholder rendered anyway"; exit 1
+          fi
+          echo "$out" | grep -q "unsubstituted placeholder" \
+            || { echo "::error::wrong error: $out"; exit 1; }
+          # and no __NAME__ token survives into any render
+          if grep -nE '__[A-Z0-9_]+__' /tmp/r/*.yaml; then
+            echo "::error::a placeholder token leaked into a render"; exit 1
+          fi
+          echo "placeholder guard fires"
 
       - name: helm test smoke pod actually renders
         run: |
@@ -148,12 +183,24 @@ jobs:
           python3 - <<'EOF'
           import glob, sys, yaml
           bad = []
-          s = yaml.safe_load(open("values.yaml"))["secrets"]
+          v0 = yaml.safe_load(open("values.yaml"))
+          s = v0["secrets"]
           for k, v in s.items():
               if k not in ("create", "extraEnv") and v:
                   bad.append(f"values.yaml secrets.{k} must be empty")
           if s["extraEnv"]:
               bad.append("values.yaml secrets.extraEnv must be empty")
+          if v0.get("placeholders"):
+              bad.append("values.yaml placeholders must be empty (real values are --set at apply time)")
+          if v0.get("placeholdersStrict") is not True:
+              bad.append("values.yaml placeholdersStrict must default to true")
+          # Credential-shaped literals anywhere in the committed values.
+          import re
+          pat = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_.=-]{30,}|[A-Za-z0-9_-]{40,}\\.[A-Za-z0-9_-]{20,})")
+          for f in ["values.yaml"] + glob.glob("deploy/**/*.yaml", recursive=True):
+              for i, line in enumerate(open(f), 1):
+                  if pat.search(line):
+                      bad.append(f"{f}:{i} looks like a committed credential")
           for f in glob.glob("deploy/**/*.yaml", recursive=True):
               v = yaml.safe_load(open(f)) or {}
               extra = set((v.get("secrets") or {}).keys()) - {"create"}

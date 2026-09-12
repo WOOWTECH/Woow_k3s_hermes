@@ -5,9 +5,18 @@
 # values here — see examples/secrets.example.yaml for what must already
 # exist as Secrets "hermes-secrets" and "cf-secrets" in this namespace.
 #
+# One value is supplied at apply time instead of being committed: the
+# dashboard basic-auth password, which this instance stores as a PLAIN env
+# value in the pod template (not a Secret). Pipe it in, never write it to a
+# file — the render fails loudly if it is missing (placeholdersStrict):
+#
 #   helm upgrade --install hermes . -n hermes --create-namespace \
-#     -f deploy/woow-k3s/hermes-hermes.yaml \
-#     --set-string hermes.dashboardAuth.password="$(the live dashboard password)"
+#     -f deploy/woow-k3s/hermes-hermes.yaml --take-ownership \
+#     --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+#
+# Not adopted by this release, on purpose: PVC hermes-home-pvc, an unmounted
+# leftover from the sidecar era that no object in this namespace references.
+# --take-ownership only touches objects the chart renders, so it stays put.
 
 instance: hermes
 
@@ -16,6 +25,13 @@ cloudflare:
   domain: woowtech-hermes.woowtech.io
 
 hermes:
+  # Live name, not the chart default (<instance>-agent-sa): renaming the
+  # ServiceAccount would change the pod template and restart the agent.
+  serviceAccountName: hermes-agent-sa
+  persistence:
+    # Pre-existing Longhorn volume from the sidecar era; kept under its old
+    # name rather than the chart default (<instance>-data).
+    claimName: hermes-webui-data
   config:
     HERMES_DOMAIN: woowtech-hermes.woowtech.io
     # Deliberately NOT the tunnel domain above — this is how the live
@@ -30,12 +46,11 @@ hermes:
     REDIS_HOST: hermes-redis-svc
     REDIS_PORT: "6379"
     WANTED_UID: "1000"
-  # Real value intentionally left blank — see hermes.dashboardAuth comment
-  # in values.yaml. Supply it at apply time, never commit it.
+  # password stays at the chart default __DASHBOARD_PASSWORD__ — supplied at
+  # apply time, see the header of this file.
   dashboardAuth:
     enabled: true
     username: admin
-    password: ""
   # Only this live instance has a hermes-toolsets-override ConfigMap with
   # real content (a one-off script that tweaks config.yaml on start).
   toolsetsOverride:
@@ -69,6 +84,11 @@ networkPolicy:
   # "" (falls back to `instance`, i.e. the real label) — safe any time,
   # NetworkPolicy changes never restart a pod.
   agentSelectorLabel: hermes-agent
+  # Off so the rendered policy stays byte-identical to the live object. The
+  # `helm test` smoke pod's Postgres/Redis checks will fail here until this
+  # is turned on (safe any time — NetworkPolicy changes never restart a pod;
+  # tracked as a follow-up together with agentSelectorLabel above).
+  allowTests: false
 
 # Everything else (cloudflared, terminal, diskCleanup, ingress, rbac) is
 # left at chart defaults, which already reproduce this instance.

@@ -72,7 +72,7 @@ spec:
       volumes:
         - name: redis-data
           persistentVolumeClaim:
-            claimName: {{ $r.persistence.claimName }}
+            claimName: {{ include "hermes.subst" (list $ $r.persistence.claimName) }}
       {{- end }}
 ---
 apiVersion: v1
@@ -103,7 +103,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ $r.persistence.claimName }}
+  name: {{ include "hermes.subst" (list $ $r.persistence.claimName) }}
   namespace: {{ include "hermes.ns" . }}
   {{- include "hermes.keepAnnotations" . | nindent 2 }}
 spec:

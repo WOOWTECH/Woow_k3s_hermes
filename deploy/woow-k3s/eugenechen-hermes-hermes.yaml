@@ -1,22 +1,25 @@
 # Instance values for the live "hermes" release in namespace
 # "eugenechen-hermes". This is the oldest, sidecar-era shape still running:
 # a disabled (replicas: 0, MUST STAY 0) two-container agent+webui pod,
-# ephemeral (no-PVC) Postgres/Redis, and a Cloudflare Tunnel that is
-# currently configured with the token as a literal CLI arg instead of a
-# Secret (see cloudflared.tokenArg below — do not "fix" this on takeover,
-# it would restart the tunnel pod under a new hash for no operational gain;
-# tracked as a follow-up instead).
+# ephemeral (no-PVC) Postgres/Redis, Services with no labels at all, and a
+# Cloudflare Tunnel configured with the token as a literal CLI arg instead
+# of a Secret (see cloudflared.tokenArg below — do not "fix" that on
+# takeover, it would restart the tunnel pod under a new pod-template hash
+# for no operational gain; tracked as a follow-up instead).
 #
-# TWO values below are intentionally left blank because the chart must
-# never commit a real secret value: postgresql's plaintext POSTGRES_PASSWORD
-# env var, and cloudflared's --token arg. Supply both out of band before a
-# real takeover — piped into --set-string, never written to a file:
+# FIVE credentials live as plain values inside these objects and are
+# therefore NOT committed — they are `__NAME__` placeholder tokens, supplied
+# at apply time and piped in, never written to a file. The render fails
+# loudly if any is missing (placeholdersStrict), so a takeover can never
+# silently ship a literal "__DASHBOARD_PASSWORD__" and restart the pod:
 #
 #   helm upgrade --install eugenechen-hermes-hermes . -n eugenechen-hermes \
 #     -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml --take-ownership \
-#     --set-string 'postgresql.env[2].value'="$PGPASS" \
-#     --set-string cloudflared.tokenArg="$TUNNEL_TOKEN" \
-#     --set-string hermes.dashboardAuth.password="$DASHPASS"
+#     --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS" \
+#     --set-string placeholders.WEBUI_PASSWORD="$WEBUIPASS" \
+#     --set-string placeholders.POSTGRES_PASSWORD="$PGPASS" \
+#     --set-string placeholders.MINIMAX_API_KEY="$MINIMAX_KEY" \
+#     --set-string placeholders.CF_TUNNEL_TOKEN="$TUNNEL_TOKEN"
 
 instance: hermes
 
@@ -26,7 +29,10 @@ secrets:
 
 hermes:
   replicaCount: 0 # MUST STAY 0 — this instance is intentionally disabled.
+  # No labels anywhere on this instance: neither the Deployments nor the
+  # Services carry any (it predates the labelling convention).
   renderLabels: false
+  svcRenderLabels: false
   serviceAccountName: ""
   serviceAccount:
     create: false
@@ -58,10 +64,11 @@ hermes:
     - name: MINIMAX_API_KEY
       valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
     - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+  # password stays at the chart default __DASHBOARD_PASSWORD__ — supplied at
+  # apply time, see the header of this file.
   dashboardAuth:
     enabled: true
     username: admin
-    password: ""
   extraEnvTail: []
   lifecyclePostStart: >-
     sed -i '/^  - hermes-cli$/d' /opt/data/config.yaml 2>/dev/null;
@@ -73,99 +80,43 @@ hermes:
     /opt/hermes/skills/media/songsee /opt/hermes/skills/media/spotify
     /opt/hermes/skills/media/youtube-content
     /opt/hermes/skills/smart-home/openhue 2>/dev/null;
-    SITE=$(/opt/hermes/.venv/bin/python3 -c "import site;print(site.getsitepackages()[0])" 2>/dev/null)
+    SITE=$(/opt/hermes/.venv/bin/python3 -c 'import site;print(site.getsitepackages()[0])' 2>/dev/null)
     && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true
   # Legacy hermes-webui sidecar — the pre-single-container architecture.
-  # Rendered verbatim; matches the live second container exactly.
+  # Reproduced field-for-field from the live container; the only values
+  # not committed verbatim are the real MiniMax key baked into `args` and
+  # the two plaintext passwords, which are placeholder tokens here.
   extraContainers:
     - name: hermes-webui
       image: ghcr.io/nesquena/hermes-webui:latest
       imagePullPolicy: Always
       command: ["sh", "-c"]
       args:
-        - |
-          mkdir -p /home/hermeswebui/.hermes
-          echo "MINIMAX_API_KEY=${MINIMAX_API_KEY}" > /home/hermeswebui/.hermes/.env
-          chmod 644 /home/hermeswebui/.hermes/.env
-          for i in $(seq 1 90); do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8642/ 2>/dev/null)
-            [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ] && break
-            sleep 2
-          done
-          rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
-          if [ -f /hermeswebui_init.bash ]; then
-            sed -i 's/chmod 700 "$itdir"/chmod 755 "$itdir"/' /hermeswebui_init.bash 2>/dev/null
-            exec /hermeswebui_init.bash
-          fi
-          cd /app; python server.py
+        - "mkdir -p /home/hermeswebui/.hermes && echo MINIMAX_API_KEY=__MINIMAX_API_KEY__ > /home/hermeswebui/.hermes/.env && chmod 644 /home/hermeswebui/.hermes/.env && for i in $(seq 1 90); do HTTP=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8642/ 2>/dev/null); [ \"$HTTP\" = \"200\" ] || [ \"$HTTP\" = \"404\" ] && break; sleep 2; done && rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null && if [ -f /hermeswebui_init.bash ]; then exec /hermeswebui_init.bash; fi && cd /app && python server.py"
       env:
-        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
+        - {name: HERMES_WEBUI_CHAT_BACKEND, value: "gateway"}
         - {name: HERMES_WEBUI_GATEWAY_USE_RUNS_API, value: "1"}
-        # The live container hardcodes the real MiniMax API key as a
-        # literal string inside its `args` shell script instead of reading
-        # it from a Secret (the `args` block below uses ${MINIMAX_API_KEY}
-        # instead of that literal, on purpose — never commit a real key).
-        # This container has 0 running replicas today (hermes.replicaCount:
-        # 0 above), so unlike everywhere else in this chart, this specific
-        # fix costs nothing on a real takeover: there is no running pod to
-        # restart.
-        - name: MINIMAX_API_KEY
-          valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
         - name: HERMES_WEBUI_GATEWAY_API_KEY
           valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
-        - {name: HERMES_WEBUI_RUNNER_BASE_URL, value: http://localhost:8642}
+        - {name: HERMES_WEBUI_RUNNER_BASE_URL, value: "http://localhost:8642"}
         - name: HERMES_WEBUI_RUNNER_API_KEY
           valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
-        - {name: HERMES_API_URL, value: http://localhost:8642}
+        - {name: HERMES_API_URL, value: "http://localhost:8642"}
         - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
         - {name: HERMES_WEBUI_PORT, value: "8787"}
-        - {name: HERMES_WEBUI_PASSWORD, value: admin}
-        - {name: HERMES_GATEWAY_URL, value: http://localhost:8642}
-        - {name: HERMES_BASE_URL, value: https://eugenechen-hermes.woowtech.io}
-        - {name: HERMES_DOMAIN, value: eugenechen-hermes.woowtech.io}
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: admin}
-        # Real value intentionally blank — see file header. Supply out of band.
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: ""}
-        - {name: HERMES_WEBUI_STATE_DIR, value: /home/hermeswebui/.hermes/webui}
-        - {name: HERMES_HOME, value: /home/hermeswebui/.hermes}
+        - {name: HERMES_WEBUI_PASSWORD, value: "__WEBUI_PASSWORD__"}
+        - {name: HERMES_GATEWAY_URL, value: "http://localhost:8642"}
+        - {name: HERMES_BASE_URL, value: "https://eugenechen-hermes.woowtech.io"}
+        - {name: HERMES_DOMAIN, value: "eugenechen-hermes.woowtech.io"}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "admin"}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: "__DASHBOARD_PASSWORD__"}
+        - {name: HERMES_WEBUI_STATE_DIR, value: "/home/hermeswebui/.hermes/webui"}
+        - {name: HERMES_HOME, value: "/home/hermeswebui/.hermes"}
       ports:
         - {containerPort: 8787, name: webui, protocol: TCP}
       resources:
         requests: {cpu: 50m, memory: 256Mi}
-        limits: {cpu: 500m, memory: 1Gi}
-  # Dashboard/webui NodePorts this legacy instance still exposes, plus a
-  # ClusterIP webui Service — none of these exist on the other instances.
-  extraServices:
-    - apiVersion: v1
-      kind: Service
-      metadata:
-        name: hermes-dashboard-nodeport
-        namespace: eugenechen-hermes
-      spec:
-        type: NodePort
-        selector: {app: hermes}
-        ports:
-          - {port: 9119, targetPort: 9119, nodePort: 30919}
-    - apiVersion: v1
-      kind: Service
-      metadata:
-        name: hermes-webui-nodeport
-        namespace: eugenechen-hermes
-      spec:
-        type: NodePort
-        selector: {app: hermes}
-        ports:
-          - {port: 8787, targetPort: 8787, nodePort: 30887}
-    - apiVersion: v1
-      kind: Service
-      metadata:
-        name: hermes-webui-svc
-        namespace: eugenechen-hermes
-      spec:
-        type: ClusterIP
-        selector: {app: hermes}
-        ports:
-          - {name: webui, port: 8787, targetPort: 8787, protocol: TCP}
+        limits: {cpu: "500m", memory: 1Gi}
   config:
     HERMES_DOMAIN: eugenechen-hermes.woowtech.io
     HERMES_BASE_URL: https://eugenechen-hermes.woowtech.io
@@ -183,6 +134,7 @@ postgresql:
   image: {repository: postgres, tag: 16-alpine, pullPolicy: IfNotPresent}
   containerName: postgres
   renderLabels: false
+  svcRenderLabels: false
   probes:
     enabled: false
   containerPortName: ""
@@ -195,16 +147,16 @@ postgresql:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
-  # Real password intentionally blank — see file header. This live
-  # instance stores it as a plain env value (not a Secret); the chart will
-  # not commit that value. Supply it via --set-string at apply time.
+  # This live instance stores the password as a plain env value, not a
+  # Secret. Placeholder here; real value supplied at apply time.
   env:
     - {name: POSTGRES_DB, value: hermes}
     - {name: POSTGRES_USER, value: hermes}
-    - {name: POSTGRES_PASSWORD, value: ""}
+    - {name: POSTGRES_PASSWORD, value: __POSTGRES_PASSWORD__}
 
 redis:
   renderLabels: false
+  svcRenderLabels: false
   containerPortName: ""
   svcPortName: ""
   commandOverride:
@@ -226,8 +178,8 @@ cloudflared:
     type: RollingUpdate
     rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
   args: [tunnel, --no-autoupdate, run]
-  # Real tunnel token intentionally blank — see file header.
-  tokenArg: ""
+  # Real tunnel token supplied at apply time — see file header.
+  tokenArg: __CF_TUNNEL_TOKEN__
   probes:
     enabled: false
   lifecyclePreStop: false

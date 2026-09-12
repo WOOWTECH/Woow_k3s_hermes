@@ -5,8 +5,14 @@
 # belongs to that Odoo stack, not to this Hermes instance, and none of the
 # other extras exist on this instance today.
 #
+# One value is supplied at apply time instead of being committed: the webui
+# sidecar's password, which this instance stores as a PLAIN env value in the
+# pod template. Pipe it in, never write it to a file — the render fails
+# loudly if it is missing (placeholdersStrict):
+#
 #   helm upgrade --install cindytech-cindytech1 . -n cindytech \
-#     -f deploy/woow-k3s/cindytech-cindytech1.yaml --take-ownership
+#     -f deploy/woow-k3s/cindytech-cindytech1.yaml --take-ownership \
+#     --set-string placeholders.WEBUI_PASSWORD="$WEBUIPASS"
 
 instance: cindytech1
 
@@ -15,6 +21,9 @@ secrets:
   create: false
 
 hermes:
+  # Live name, not the chart default (<instance>-agent-sa): renaming the
+  # ServiceAccount would change the pod template and restart the agent.
+  serviceAccountName: hermes-agent-sa
   image:
     repository: jcr-prod.woowtech.io/woow-paas-docker-local/hermes-agent-custom
     tag: aorus-20260727
@@ -103,7 +112,7 @@ hermes:
         - {name: WANTED_UID, value: "1000"}
         - {name: WANTED_GID, value: "1000"}
         - {name: GATEWAY_HEALTH_URL, value: http://localhost:8642}
-        - {name: HERMES_WEBUI_PASSWORD, value: admin}
+        - {name: HERMES_WEBUI_PASSWORD, value: __WEBUI_PASSWORD__}
       ports:
         - {containerPort: 8787, name: http, protocol: TCP}
       readinessProbe:
@@ -123,20 +132,6 @@ hermes:
         - {name: hermes-data, mountPath: /home/hermeswebui/.hermes}
         - {name: playwright-shared, mountPath: /opt/playwright-browsers}
         - {name: tools-shared, mountPath: /opt/shared-tools}
-  # cindytech1-webui-svc points at this same Deployment's pods
-  # (selector app: cindytech1) — kept in this release rather than left an
-  # orphan, even though it wasn't in the task's headline component list.
-  extraServices:
-    - apiVersion: v1
-      kind: Service
-      metadata:
-        name: cindytech1-webui-svc
-        namespace: cindytech
-      spec:
-        type: ClusterIP
-        selector: {app: cindytech1}
-        ports:
-          - {name: http, port: 8787, targetPort: 8787, protocol: TCP}
   config:
     HERMES_DOMAIN: cindytech1-hermes.woowtech.io
     HERMES_BASE_URL: https://cindytech1-hermes.woowtech.io

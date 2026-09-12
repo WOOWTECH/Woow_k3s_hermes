@@ -60,5 +60,5 @@ spec:
           volumes:
           - name: data
             persistentVolumeClaim:
-              claimName: {{ .Values.hermes.persistence.claimName }}
+              claimName: {{ include "hermes.subst" (list $ .Values.hermes.persistence.claimName) }}
 {{- end }}

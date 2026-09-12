@@ -3,7 +3,13 @@
 # sync, 1 = drift. Extra arguments are passed to `helm template`.
 #
 #   CONTEXT=woow-k3s RELEASE=hermes NAMESPACE=hermes \
-#     scripts/check-drift.sh -f deploy/woow-k3s/hermes-hermes.yaml
+#     scripts/check-drift.sh -f deploy/woow-k3s/hermes-hermes.yaml \
+#     --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+#
+# Instance files carry __NAME__ placeholders for credentials that live as
+# plain values inside a pod template; pass the real ones through, or the
+# render fails (placeholdersStrict). See the header of each instance file
+# for the list, and README "Placeholders".
 #
 # Run once per live instance — this repo currently has three:
 #   RELEASE=hermes                   NAMESPACE=hermes             -f deploy/woow-k3s/hermes-hermes.yaml

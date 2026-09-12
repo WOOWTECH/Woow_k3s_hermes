@@ -36,7 +36,7 @@ spec:
               {{- end }}
               protocol: TCP
           env:
-            {{- toYaml $p.env | nindent 12 }}
+            {{- include "hermes.substYaml" (list $ $p.env) | nindent 12 }}
           {{- if and $p.probes.enabled $p.probes.readiness }}
           readinessProbe:
             exec:
@@ -64,7 +64,7 @@ spec:
       volumes:
         - name: {{ $p.volumeName }}
           persistentVolumeClaim:
-            claimName: {{ $p.persistence.claimName }}
+            claimName: {{ include "hermes.subst" (list $ $p.persistence.claimName) }}
       {{- end }}
 ---
 apiVersion: v1
@@ -95,7 +95,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ $p.persistence.claimName }}
+  name: {{ include "hermes.subst" (list $ $p.persistence.claimName) }}
   namespace: {{ include "hermes.ns" . }}
   {{- include "hermes.keepAnnotations" . | nindent 2 }}
 spec:

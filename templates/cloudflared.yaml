@@ -47,7 +47,7 @@ spec:
           args:
             {{- toYaml $c.args | nindent 12 }}
             - --token
-            - {{ $c.tokenArg | quote }}
+            - {{ include "hermes.subst" (list $ $c.tokenArg) | quote }}
           {{- else }}
           args:
             {{- toYaml $c.args | nindent 12 }}
