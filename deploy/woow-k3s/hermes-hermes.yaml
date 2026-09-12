@@ -53,6 +53,24 @@ hermes:
         yq -i '.model.provider = "minimax"' /opt/data/config.yaml
         yq -i '.model.context_length = 200000' /opt/data/config.yaml
 
-# Everything else (postgresql, redis, cloudflared, terminal, diskCleanup,
-# networkPolicy, ingress, rbac) is left at chart defaults, which already
-# reproduce this instance.
+postgresql:
+  extraLabels:
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: hermes
+
+redis:
+  extraLabels:
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: hermes
+
+networkPolicy:
+  # KNOWN BUG, reproduced as-is: the live NetworkPolicy's ingress rule
+  # allows from `app: hermes-agent`, a label no pod here has carried since
+  # an earlier naming convention (the agent pod's real label is `app:
+  # hermes`). The rule currently matches nothing. Follow-up: change this to
+  # "" (falls back to `instance`, i.e. the real label) — safe any time,
+  # NetworkPolicy changes never restart a pod.
+  agentSelectorLabel: hermes-agent
+
+# Everything else (cloudflared, terminal, diskCleanup, ingress, rbac) is
+# left at chart defaults, which already reproduce this instance.

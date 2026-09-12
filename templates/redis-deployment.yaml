@@ -81,7 +81,7 @@ metadata:
   {{- if $r.renderLabels }}
   labels:
     app: {{ $instance }}-redis
-    {{- with $r.extraLabels }}
+    {{- with $r.svcExtraLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}

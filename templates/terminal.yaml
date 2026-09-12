@@ -56,7 +56,7 @@ data:
         echo "Session ended. Reconnecting in 2s..."
         sleep 2
       else
-        echo "Waiting for {{ $instance }} agent pod..."
+        echo "Waiting for {{ $instance }}-agent pod..."
         sleep 5
       fi
     done

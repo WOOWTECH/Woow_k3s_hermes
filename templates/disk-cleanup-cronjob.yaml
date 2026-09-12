@@ -42,28 +42,17 @@ spec:
               set -eu
               echo "[$(date -u +%FT%TZ)] hermes disk cleanup start"
               df -h /data
-
-              # 1. Per-request debug dumps — noisy, no consumer.
               BEFORE_RD=$(find /data/sessions -name 'request_dump_*.json' -type f 2>/dev/null | wc -l)
               find /data/sessions -name 'request_dump_*.json' -type f -mtime +7 -delete 2>/dev/null || true
               AFTER_RD=$(find /data/sessions -name 'request_dump_*.json' -type f 2>/dev/null | wc -l)
-              echo "  request_dumps (>7d): $BEFORE_RD -> $AFTER_RD"
-
-              # 2. Per-run journal files — accumulate 1/turn.
+              echo "  request_dumps: $BEFORE_RD -> $AFTER_RD"
               find /data/webui/sessions/_run_journal -mindepth 1 -type f -mtime +30 -delete 2>/dev/null || true
               find /data/webui/sessions/_run_journal -mindepth 1 -type d -empty -delete 2>/dev/null || true
-
-              # 3. Curator run logs (skills catalog scans).
               find /data/logs/curator -mindepth 1 -type f -mtime +30 -delete 2>/dev/null || true
               find /data/logs/curator -mindepth 1 -type d -empty -delete 2>/dev/null || true
-
-              # 4. Rotated gateway logs — keep only the newest 3.
               ls -1t /data/logs/gateways/default/*.s 2>/dev/null | tail -n +4 | xargs -r rm -f
-
-              # 5. Explicit backup dirs from manual wipe operations.
               rm -rf /data/webui/sessions.bak-* 2>/dev/null || true
-              rm -f  /data/state.db*.wipe-bak-* 2>/dev/null || true
-
+              rm -f /data/state.db*.wipe-bak-* 2>/dev/null || true
               df -h /data
               echo "[$(date -u +%FT%TZ)] hermes disk cleanup done"
             volumeMounts:

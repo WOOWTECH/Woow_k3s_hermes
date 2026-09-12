@@ -73,7 +73,7 @@ metadata:
   {{- if $p.renderLabels }}
   labels:
     app: {{ $instance }}-postgresql
-    {{- with $p.extraLabels }}
+    {{- with $p.svcExtraLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}

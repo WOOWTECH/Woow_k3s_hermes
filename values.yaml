@@ -77,18 +77,23 @@ hermes:
     # No RBAC is attached unless rbac.enabled=true (see below).
     create: true
   imagePullSecrets: []
-  # Render a `labels:` block (app: <instance>, plus extraLabels) on the
-  # agent Deployment/Service's own metadata — never on the selector or pod
-  # template, that would restart every existing pod under a different
-  # owner-selector. One live instance (eugenechen-hermes) predates labels
-  # entirely and has none at all; set this false to match it exactly.
+  # Render a `labels:` block (app: <instance>, plus extraLabels/
+  # svcExtraLabels) on the agent Deployment/Service's own metadata — never
+  # on the selector or pod template, that would restart every existing pod
+  # under a different owner-selector. One live instance (eugenechen-hermes)
+  # predates labels entirely and has none at all; set this false to match
+  # it exactly.
   renderLabels: true
-  # Extra labels merged in alongside `app: <instance>` when renderLabels is
-  # true. The "hermes" instance in namespace "hermes" is the only live
-  # instance carrying these; others (when renderLabels=true) have bare
-  # `app: <instance>` only.
+  # Extra labels merged in alongside `app: <instance>` on the Deployment
+  # only, when renderLabels is true. The "hermes" instance in namespace
+  # "hermes" is the only live instance carrying these; others (when
+  # renderLabels=true) have bare `app: <instance>` only.
   extraLabels:
     app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: hermes
+  # Same, but for the Service — deliberately without app.kubernetes.io/
+  # component (the live Service never had it, only the Deployment did).
+  svcExtraLabels:
     app.kubernetes.io/part-of: hermes
   podSecurityContext:
     fsGroup: 0
@@ -214,10 +219,14 @@ postgresql:
   # One live instance (eugenechen-hermes, ephemeral/no-persistence) has no
   # labels at all on this Deployment/Service; set this false to match it.
   renderLabels: true
-  # Merged in alongside `app: <instance>-postgresql` when renderLabels is
-  # true. The "hermes" instance has this; cindytech1 (renderLabels=true,
-  # bare `app: ...` only) sets it to {}.
+  # Merged in alongside `app: <instance>-postgresql` on the Deployment when
+  # renderLabels is true. The "hermes" instance adds component: database on
+  # top of this (see deploy/woow-k3s/hermes-hermes.yaml); cindytech1
+  # (renderLabels=true, bare `app: ...` only) sets it to {}.
   extraLabels:
+    app.kubernetes.io/part-of: hermes
+  # Same, for the Service — deliberately never gets a component label.
+  svcExtraLabels:
     app.kubernetes.io/part-of: hermes
   # pg_isready readiness/liveness probes. Off on the one live instance that
   # predates them.
@@ -266,6 +275,8 @@ redis:
     type: Recreate
   renderLabels: true
   extraLabels:
+    app.kubernetes.io/part-of: hermes
+  svcExtraLabels:
     app.kubernetes.io/part-of: hermes
   # `redis-server --appendonly yes ...` command override. Off (bare
   # `redis-server`, in-memory only) on the one live instance that predates
@@ -350,6 +361,14 @@ cloudflare:
 # policy"; only the "hermes" instance in namespace "hermes" has these live.
 networkPolicy:
   enabled: true
+  # `app` value the ingress rule allows FROM. Empty = use `instance` (i.e.
+  # the agent pod's real label). The one live instance that has this
+  # NetworkPolicy actually references "hermes-agent" — a stale label from
+  # an earlier convention that no pod has carried in a long time, so this
+  # rule currently matches nothing. Reproduced as-is here; see
+  # deploy/woow-k3s/hermes-hermes.yaml for the override and the follow-up
+  # to fix it (safe: NetworkPolicy changes never restart a pod).
+  agentSelectorLabel: ""
 
 # ttyd browser terminal (K3s-only add-on): shell into the agent pod via
 # `kubectl exec` from a small ttyd pod. Named "<instance>-terminal*"; only

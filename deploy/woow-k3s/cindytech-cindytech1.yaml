@@ -22,6 +22,7 @@ hermes:
     tag: aorus-20260727
     pullPolicy: IfNotPresent
   extraLabels: {}
+  svcExtraLabels: {}
   imagePullSecrets:
     - name: jfrog-registry
   persistence:
@@ -149,6 +150,7 @@ hermes:
 
 postgresql:
   extraLabels: {}
+  svcExtraLabels: {}
   containerPortName: ""
   svcPortName: postgresql
   persistence:
@@ -169,6 +171,7 @@ postgresql:
 
 redis:
   extraLabels: {}
+  svcExtraLabels: {}
   containerPortName: ""
   svcPortName: redis
   persistence:

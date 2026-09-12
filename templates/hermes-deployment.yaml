@@ -101,7 +101,7 @@ metadata:
   {{- if $h.renderLabels }}
   labels:
     app: {{ $instance }}
-    {{- with $h.extraLabels }}
+    {{- with $h.svcExtraLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}
