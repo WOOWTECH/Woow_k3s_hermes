@@ -148,6 +148,36 @@ spec:
 {{- end }}
 {{- if and $h.serviceAccount.create $h.serviceAccountName }}
 ---
+{{- /*
+Service in front of the webui sidecar. Rendered only when
+hermes.service.webuiPort is set, so instances that never had one keep their
+exact previous object set. The name matches what the Cloudflare tunnel already
+expects: "<instance>-webui-svc".
+*/ -}}
+{{- if $h.service.webuiPort }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $instance }}-webui-svc
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $h.svcRenderLabels }}
+  labels:
+    app: {{ $instance }}
+    {{- with $h.svcExtraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $instance }}
+  ports:
+  - port: {{ $h.service.webuiPort }}
+    targetPort: 8787
+    name: http
+    protocol: TCP
+{{- end }}
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:

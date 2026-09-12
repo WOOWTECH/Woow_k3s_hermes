@@ -151,6 +151,12 @@ hermes:
     type: ClusterIP
     gatewayPort: 8642
     dashboardPort: 9119
+    # Port for a Service in front of the webui sidecar (container port 8787).
+    # null = no webui Service is rendered, which is the historical behaviour.
+    # Set it for any instance whose Cloudflare tunnel routes a hostname to
+    # "<instance>-webui-svc:8787" — without the Service that hostname 502s even
+    # though the webui container itself is healthy.
+    webuiPort: null
     # Only rendered when service.type=NodePort.
     nodePort: null
     dashboardNodePort: null

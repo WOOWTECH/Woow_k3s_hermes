@@ -25,6 +25,13 @@ cloudflare:
   domain: woowtech-hermes.woowtech.io
 
 hermes:
+  # The Cloudflare tunnel routes woowtech-hermes.woowtech.io to <instance>-webui-svc:8787.
+  # Without this Service that hostname returns 502 even though the webui
+  # sidecar is healthy (proved with an in-cluster call to localhost:8787).
+  # Merges with the chart's service defaults; gateway/dashboard ports unchanged.
+  service:
+    webuiPort: 8787
+
   # Live name, not the chart default (<instance>-agent-sa): renaming the
   # ServiceAccount would change the pod template and restart the agent.
   serviceAccountName: hermes-agent-sa
