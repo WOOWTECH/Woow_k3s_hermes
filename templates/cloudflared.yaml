@@ -1,43 +1,65 @@
+{{- /*
+Cloudflare Tunnel. NOT instance-scoped by name — see values.yaml comment on
+cloudflared.enabled. A second release in the same namespace must leave this
+disabled.
+*/ -}}
 {{- if .Values.cloudflared.enabled }}
+{{- $c := .Values.cloudflared }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $c.renderLabels }}
   labels:
     app: cloudflared
-    app.kubernetes.io/component: tunnel
-    app.kubernetes.io/part-of: hermes
+    {{- with $c.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
-  replicas: {{ .Values.cloudflared.replicaCount }}
+  replicas: {{ $c.replicaCount }}
   strategy:
-    type: Recreate
+    {{- toYaml $c.strategy | nindent 4 }}
   selector:
     matchLabels:
       app: cloudflared
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $c.podAnnotations | nindent 6 }}
       labels:
         app: cloudflared
     spec:
-      {{- with .Values.cloudflared.nodeSelector }}
+      {{- with $c.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
         - name: cloudflared
-          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
-          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
+          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          {{- if $c.tokenArg }}
+          # A one-off value carries the real tunnel token as a literal CLI
+          # arg (as this instance's live object does today) instead of a
+          # Secret reference. Never commit a real value for this — see
+          # deploy/woow-k3s/<this instance>.yaml for why and the follow-up
+          # to migrate it off this pattern.
           args:
-            - tunnel
-            - run
+            {{- toYaml $c.args | nindent 12 }}
+            - --token
+            - {{ include "hermes.subst" (list $ $c.tokenArg) | quote }}
+          {{- else }}
+          args:
+            {{- toYaml $c.args | nindent 12 }}
           env:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: cf-secrets
                   key: CF_TUNNEL_TOKEN
+          {{- end }}
+          {{- if $c.probes.enabled }}
           livenessProbe:
             httpGet:
               path: /ready
@@ -51,11 +73,14 @@ spec:
               port: 20241
             initialDelaySeconds: 10
             periodSeconds: 30
+          {{- end }}
+          {{- if $c.lifecyclePreStop }}
           lifecycle:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
+          {{- end }}
           resources:
-            {{- toYaml .Values.cloudflared.resources | nindent 12 }}
+            {{- toYaml $c.resources | nindent 12 }}
       restartPolicy: Always
 {{- end }}

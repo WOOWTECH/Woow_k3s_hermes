@@ -1,90 +1,67 @@
+{{- $instance := include "hermes.instance" . }}
+{{- $h := .Values.hermes }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hermes
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $h.renderLabels }}
   labels:
-    app: hermes
-    app.kubernetes.io/component: agent
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}
+    {{- with $h.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
-  replicas: {{ .Values.hermes.replicaCount }}
+  replicas: {{ $h.replicaCount }}
   strategy:
-    type: {{ .Values.hermes.strategy }}
+    type: {{ $h.strategy }}
   selector:
     matchLabels:
-      app: hermes
+      app: {{ $instance }}
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $h.podAnnotations | nindent 6 }}
       labels:
-        app: hermes
+        app: {{ $instance }}
     spec:
-      serviceAccountName: {{ .Values.hermes.serviceAccountName }}
+      {{- if $h.serviceAccountName }}
+      serviceAccountName: {{ include "hermes.subst" (list $ $h.serviceAccountName) }}
+      {{- end }}
+      {{- with $h.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $h.podSecurityContext }}
       securityContext:
-        {{- toYaml .Values.hermes.securityContext | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: hermes-agent
-        image: "{{ .Values.hermes.image.repository }}:{{ .Values.hermes.image.tag }}"
-        # Base manifest used :latest without pullPolicy → default `Always`.
-        # We explicitly set it here (Helm-convention) but the runtime behavior
-        # is identical to the original manifest.
-        imagePullPolicy: {{ .Values.hermes.image.pullPolicy }}
+        image: "{{ $h.image.repository }}:{{ $h.image.tag }}"
+        imagePullPolicy: {{ $h.image.pullPolicy }}
         args: [gateway, run]
         ports:
         - {containerPort: 8642, name: gateway, protocol: TCP}
         - {containerPort: 9119, name: dashboard, protocol: TCP}
         env:
-        - {name: HERMES_DASHBOARD, value: "1"}
-        - {name: HERMES_DASHBOARD_INSECURE, value: "1"}
-        - {name: HERMES_UID, value: "1000"}
-        - {name: HERMES_GID, value: "1000"}
-        - {name: API_SERVER_ENABLED, value: "true"}
-        - {name: API_SERVER_HOST, value: "0.0.0.0"}
-        - name: API_SERVER_KEY
-          valueFrom:
-            secretKeyRef:
-              name: hermes-secrets
-              key: API_SERVER_KEY
-        - {name: API_SERVER_CORS_ORIGINS, value: "*"}
-        - {name: GATEWAY_ALLOW_ALL_USERS, value: "true"}
-        - name: MINIMAX_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: hermes-secrets
-              key: MINIMAX_API_KEY
-        - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
-        - {name: PATH, value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/google-cloud-sdk/bin"}
-        - {name: HERMES_DASHBOARD_TUI, value: "1"}
-        - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: {{ .Values.dashboard.username | quote }} }
-        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: {{ .Values.dashboard.password | quote }} }
-        - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
-        {{- if .Values.dashboard.publicUrl }}
-        - {name: HERMES_DASHBOARD_PUBLIC_URL, value: {{ .Values.dashboard.publicUrl | quote }} }
+          {{- include "hermes.substYaml" (list $ $h.env) | nindent 8 }}
+        {{- if $h.dashboardAuth.enabled }}
+        - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+          value: {{ include "hermes.subst" (list $ $h.dashboardAuth.username) | quote }}
+        - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+          value: {{ include "hermes.subst" (list $ $h.dashboardAuth.password) | quote }}
         {{- end }}
+        {{- with $h.extraEnvTail }}
+        {{- include "hermes.substYaml" (list $ .) | nindent 8 }}
+        {{- end }}
+        {{- if $h.lifecyclePostStart }}
         lifecycle:
           postStart:
             exec:
-              command:
-              - sh
-              - -c
-              - >-
-                rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null;
-                ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes 2>/dev/null;
-                rm -rf /opt/hermes/skills/apple /opt/hermes/skills/gaming
-                /opt/hermes/skills/email /opt/hermes/skills/social-media
-                /opt/hermes/skills/yuanbao /opt/hermes/skills/media/heartmula
-                /opt/hermes/skills/media/songsee /opt/hermes/skills/media/spotify
-                /opt/hermes/skills/media/youtube-content
-                /opt/hermes/skills/smart-home/openhue 2>/dev/null;
-                SITE=$(/opt/hermes/.venv/bin/python3 -c "import site;print(site.getsitepackages()[0])" 2>/dev/null)
-                && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true;
-                curl -sfL -o /opt/data/officecli "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.135/officecli-linux-x64" 2>/dev/null
-                && chmod +x /opt/data/officecli && ln -sf /opt/data/officecli /usr/local/bin/officecli 2>/dev/null || true;
-                [ -x /opt/data/officecli ] && cp -f /opt/data/officecli /shared-tools/officecli 2>/dev/null
-                && chmod +x /shared-tools/officecli 2>/dev/null || true;
-                test -f /opt/data/mcp_patch.py && /opt/hermes/.venv/bin/python3 /opt/data/mcp_patch.py 2>/dev/null || true;
-                test -f /opt/data/install_video_pipeline.sh && bash /opt/data/install_video_pipeline.sh >/opt/data/install_video_pipeline.log 2>&1 || true
+              command: ["sh", "-c", {{ include "hermes.subst" (list $ $h.lifecyclePostStart) | quote }}]
+        {{- end }}
+        {{- if $h.probes.enabled }}
         readinessProbe:
           tcpSocket: {port: 8642}
           initialDelaySeconds: 10
@@ -95,47 +72,102 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 30
           failureThreshold: 5
+        {{- end }}
         resources:
-          {{- toYaml .Values.hermes.resources | nindent 10 }}
+          {{- toYaml $h.resources | nindent 10 }}
+        {{- with $h.containerSecurityContext }}
         securityContext:
-          {{- toYaml .Values.hermes.containerSecurityContext | nindent 10 }}
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         - {mountPath: /opt/data, name: hermes-data}
+        {{- if $h.sharedVolumes.enabled }}
         - {mountPath: /shared-pw, name: playwright-shared}
         - {mountPath: /shared-tools, name: tools-shared}
+        {{- end }}
+      {{- with $h.extraContainers }}
+      {{- include "hermes.substYaml" (list $ .) | nindent 6 }}
+      {{- end }}
       volumes:
       - name: hermes-data
         persistentVolumeClaim:
-          claimName: {{ .Values.hermes.persistence.claimName }}
+          claimName: {{ include "hermes.subst" (list $ $h.persistence.claimName) }}
+      {{- if $h.sharedVolumes.enabled }}
       - name: playwright-shared
         emptyDir: {}
       - name: tools-shared
         emptyDir: {}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: hermes-agent-svc
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-agent-svc
+  namespace: {{ include "hermes.ns" . }}
+  {{- if $h.svcRenderLabels }}
   labels:
-    app: hermes
-    app.kubernetes.io/part-of: hermes
+    app: {{ $instance }}
+    {{- with $h.svcExtraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
 spec:
   selector:
-    app: hermes
+    app: {{ $instance }}
   ports:
-  - port: {{ .Values.hermes.service.gatewayPort }}
+  - port: {{ $h.service.gatewayPort }}
     targetPort: 8642
     name: gateway
     protocol: TCP
-    {{- if and (eq .Values.hermes.service.type "NodePort") .Values.hermes.service.nodePort }}
-    nodePort: {{ .Values.hermes.service.nodePort }}
+    {{- if and (eq $h.service.type "NodePort") $h.service.nodePort }}
+    nodePort: {{ $h.service.nodePort }}
     {{- end }}
-  - port: {{ .Values.hermes.service.dashboardPort }}
+  - port: {{ $h.service.dashboardPort }}
     targetPort: 9119
     name: dashboard
     protocol: TCP
-    {{- if and (eq .Values.hermes.service.type "NodePort") .Values.hermes.service.dashboardNodePort }}
-    nodePort: {{ .Values.hermes.service.dashboardNodePort }}
+    {{- if and (eq $h.service.type "NodePort") $h.service.dashboardNodePort }}
+    nodePort: {{ $h.service.dashboardNodePort }}
     {{- end }}
-  type: {{ .Values.hermes.service.type }}
+  type: {{ $h.service.type }}
+{{- /*
+Extra Services, rendered verbatim EXCEPT metadata.namespace, which this
+chart always overrides with the release namespace. A namespace baked into a
+values file would survive `-n <test-ns>` and write straight into the live
+namespace during a rehearsal.
+*/ -}}
+{{- range $svc := $h.extraServices }}
+---
+apiVersion: {{ $svc.apiVersion | default "v1" }}
+kind: {{ $svc.kind | default "Service" }}
+metadata:
+  {{- toYaml (omit ($svc.metadata | default dict) "namespace") | nindent 2 }}
+  namespace: {{ include "hermes.ns" $ }}
+spec:
+  {{- toYaml $svc.spec | nindent 2 }}
+{{- end }}
+{{- if and $h.serviceAccount.create $h.serviceAccountName }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "hermes.subst" (list $ $h.serviceAccountName) }}
+  namespace: {{ include "hermes.ns" . }}
+{{- end }}
+---
+# Agent data PVC. Name kept overridable (see hermes.persistence.claimName
+# comment in values.yaml) for backward compatibility with pre-existing
+# volumes from the sidecar era.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hermes.subst" (list $ $h.persistence.claimName) }}
+  namespace: {{ include "hermes.ns" . }}
+  {{- include "hermes.keepAnnotations" . | nindent 2 }}
+spec:
+  storageClassName: {{ $h.persistence.storageClassName }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $h.persistence.size }}

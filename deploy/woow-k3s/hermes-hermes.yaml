@@ -1,0 +1,101 @@
+# Instance values for the live "hermes" release in namespace "hermes".
+# This is the most complete live instance and is what values.yaml's
+# defaults are modeled on, so this file is mostly overrides for what's
+# genuinely specific to it (domain, toolsets override content). No secret
+# values here — see examples/secrets.example.yaml for what must already
+# exist as Secrets "hermes-secrets" and "cf-secrets" in this namespace.
+#
+# One value is supplied at apply time instead of being committed: the
+# dashboard basic-auth password, which this instance stores as a PLAIN env
+# value in the pod template (not a Secret). Pipe it in, never write it to a
+# file — the render fails loudly if it is missing (placeholdersStrict):
+#
+#   helm upgrade --install hermes . -n hermes --create-namespace \
+#     -f deploy/woow-k3s/hermes-hermes.yaml --take-ownership \
+#     --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+#
+# Not adopted by this release, on purpose: PVC hermes-home-pvc, an unmounted
+# leftover from the sidecar era that no object in this namespace references.
+# --take-ownership only touches objects the chart renders, so it stays put.
+
+instance: hermes
+
+
+cloudflare:
+  domain: woowtech-hermes.woowtech.io
+
+hermes:
+  # Live name, not the chart default (<instance>-agent-sa): renaming the
+  # ServiceAccount would change the pod template and restart the agent.
+  serviceAccountName: hermes-agent-sa
+  persistence:
+    # Pre-existing Longhorn volume from the sidecar era; kept under its old
+    # name rather than the chart default (<instance>-data).
+    claimName: hermes-webui-data
+  config:
+    HERMES_DOMAIN: woowtech-hermes.woowtech.io
+    # Deliberately NOT the tunnel domain above — this is how the live
+    # ConfigMap is actually set.
+    HERMES_BASE_URL: https://woowtech-dashboard.woowtech.io
+    HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
+    POSTGRES_HOST: hermes-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: hermes-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+  # password stays at the chart default __DASHBOARD_PASSWORD__ — supplied at
+  # apply time, see the header of this file.
+  dashboardAuth:
+    enabled: true
+    username: admin
+  # Only this live instance has a hermes-toolsets-override ConfigMap with
+  # real content (a one-off script that tweaks config.yaml on start).
+  toolsetsOverride:
+    enabled: true
+    data:
+      apply-toolsets.sh: |
+        #!/bin/sh
+        sleep 3
+        yq -i '.platform_toolsets.api_server = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.platform_toolsets.webui = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.platform_toolsets.cli = ["terminal","file","web","memory","skills"]' /opt/data/config.yaml
+        yq -i '.model.default = "minimax/MiniMax-M2.7"' /opt/data/config.yaml
+        yq -i '.model.provider = "minimax"' /opt/data/config.yaml
+        yq -i '.model.context_length = 200000' /opt/data/config.yaml
+
+postgresql:
+  extraLabels:
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: hermes
+
+redis:
+  extraLabels:
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: hermes
+
+networkPolicy:
+  # KNOWN BUG, reproduced as-is: the live NetworkPolicy's ingress rule
+  # allows from `app: hermes-agent`, a label no pod here has carried since
+  # an earlier naming convention (the agent pod's real label is `app:
+  # hermes`). The rule currently matches nothing. Follow-up: change this to
+  # "" (falls back to `instance`, i.e. the real label) — safe any time,
+  # NetworkPolicy changes never restart a pod.
+  agentSelectorLabel: hermes-agent
+  # Off so the rendered policy stays byte-identical to the live object. The
+  # `helm test` smoke pod's Postgres/Redis checks will fail here until this
+  # is turned on (safe any time — NetworkPolicy changes never restart a pod;
+  # tracked as a follow-up together with agentSelectorLabel above).
+  allowTests: false
+
+# Everything else (terminal, diskCleanup, ingress, rbac) is left at chart
+# defaults, which already reproduce this instance.
+
+cloudflared:
+  # Replay of the live pod-template annotation left by a past `kubectl
+  # rollout restart`. It is part of the pod-template hash, so dropping it on
+  # takeover would roll the tunnel pod.
+  podAnnotations:
+    kubectl.kubernetes.io/restartedAt: "2026-07-23T20:37:16+08:00"

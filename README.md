@@ -38,6 +38,7 @@
 - [Browser Terminal (ttyd)](#browser-terminal-ttyd)
 - [Screenshots](#screenshots)
 - [Deployment](#deployment)
+- [Uninstall](#uninstall)
 - [Custom Docker Image](#custom-docker-image)
 - [Multi-Instance Deployment](#multi-instance-deployment)
 - [White-Label Branding](#white-label-branding)
@@ -414,37 +415,67 @@ The terminal is deployed as a separate lightweight pod (`templates/terminal.yaml
 
 ### Quick Start (Helm)
 
+One release reproduces one Hermes instance. `instance` sets the name every
+object in the release gets (`hermes`, `hermes-postgresql`, ...) — several
+releases can share one namespace as long as each uses a different
+`instance`. Secrets are **referenced, never rendered** by default: create
+them yourself first (see `examples/secrets.example.yaml`), the same way you
+would for any other credential.
+
 ```bash
-# 1. Clone this repo
+# 1. Get the chart — clone the repo (the tarball alternative is below the block)
 git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
 cd Woow_k3s_hermes
 
-# 2. Create a values override with your secrets and domain
+# 2. Create the Secrets this instance needs (see examples/secrets.example.yaml
+#    for every key). Never commit the filled-in file.
+kubectl create namespace hermes
+kubectl -n hermes create secret generic hermes-secrets \
+  --from-literal=API_SERVER_KEY="$(openssl rand -hex 24)" \
+  --from-literal=MINIMAX_API_KEY="<your-minimax-key>" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=TTYD_PASSWORD="$(openssl rand -hex 16)"
+# Only if cloudflared.enabled (the default):
+kubectl -n hermes create secret generic cf-secrets \
+  --from-literal=CF_API_TOKEN="<cloudflare-api-token>" \
+  --from-literal=CF_TUNNEL_TOKEN="<cloudflare-tunnel-token>"
+
+# 3. Create a values override — instance name and anything else specific
+#    to this instance. Do NOT put `namespace:` in it: object placement
+#    follows `-n`, and a pinned namespace would survive `-n` and write
+#    somewhere you did not mean.
 cat > my-values.yaml <<'EOF'
-namespace:
-  name: hermes
-
-secrets:
-  API_SERVER_KEY:     "<generate-a-strong-key>"
-  MINIMAX_API_KEY:    "<your-minimax-key>"
-  POSTGRES_PASSWORD:  "<pg-password>"
-  TTYD_PASSWORD:      "<ttyd-basic-auth>"
-  CF_API_TOKEN:       "<cloudflare-api-token>"
-  CF_TUNNEL_TOKEN:    "<cloudflare-tunnel-token>"
-
-cloudflare:
-  domain: hermes.example.com
-  ingress:
-    enabled: true
-    className: traefik
+instance: hermes
 EOF
 
-# 3. Install (creates the namespace + all resources)
-helm install hermes . -n hermes --create-namespace -f my-values.yaml
+# 4. Install. The domain and the dashboard password are placeholders, so
+#    they must be supplied here — never committed to the values file.
+helm install hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
 
-# 4. Watch it come up
+# 5. Watch it come up, then verify
 kubectl -n hermes get pods -w
+helm test hermes -n hermes
 ```
+
+**... or install straight from the GitHub tarball, no clone needed.** Steps 2
+and 3 are unchanged (the Secrets and the values override do not depend on
+where the chart comes from); only step 4 differs — pass the tarball URL
+instead of `.`:
+
+```bash
+helm install hermes \
+  https://github.com/WOOWTECH/Woow_k3s_hermes/archive/refs/heads/main.tar.gz \
+  -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+To take over an **existing** hand-managed instance instead of creating a new
+one, see the per-instance files under `deploy/woow-k3s/` and pass
+`--take-ownership` to `helm upgrade --install` — see
+[Multi-Instance Deployment](#multi-instance-deployment).
 
 ### Feature Toggles (`values.yaml`)
 
@@ -453,21 +484,29 @@ dev clusters or turn everything on for a full production install.
 
 | Toggle | Default | What it renders |
 |--------|---------|-----------------|
-| `namespace.create` | `true` | The `Namespace` object itself. |
-| `postgresql.enabled` | `true` | PostgreSQL 15 Deployment + Service + PVC. |
-| `redis.enabled` | `true` | Redis 7-alpine Deployment + Service + PVC. |
-| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment (needs `CF_TUNNEL_TOKEN`). |
-| `cloudflare.ingress.enabled` | `true` | `Ingress` that routes `<domain>/api` to the gateway. |
-| `terminal.enabled` | `true` | ttyd browser terminal (SA/Role/RoleBinding + Deployment + Service). |
-| `diskCleanup.enabled` | `true` | Nightly CronJob that trims journals + dumps on the agent PVC. |
-| `networkPolicy.enabled` | `true` | NetworkPolicies restricting DB/Redis to `hermes-agent` pods. |
+| `namespace.create` | `true` | The `Namespace` object (skipped if it equals `-n`). |
+| `keepOnUninstall` | `true` | Adds `helm.sh/resource-policy: keep` to the PVCs, the chart-created Secrets and a rendered `Namespace`, so `helm uninstall` never deletes data (see [Uninstall](#uninstall)). |
+| `secrets.create` | `false` | Renders `<instance>-secrets` + `cf-secrets` from values (guarded by `required()`). Off by default — Secrets are referenced, not owned by the chart. |
+| `postgresql.enabled` | `true` | Postgres Deployment + Service + PVC. |
+| `redis.enabled` | `true` | Redis Deployment + Service + PVC. |
+| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment (needs `cf-secrets`). Not instance-scoped — one per namespace; a second release sharing a namespace must set this `false`. |
+| `cloudflare.ingress.enabled` | `true` | `<instance>-ingress` routing `<domain>/api` to the gateway. |
+| `terminal.enabled` | `true` | ttyd browser terminal (SA/Role/RoleBinding + Deployment + Service), named `<instance>-terminal*`. |
+| `diskCleanup.enabled` | `true` | Nightly `<instance>-disk-cleanup` CronJob that trims journals + dumps on the agent PVC. |
+| `networkPolicy.enabled` | `true` | `<instance>-postgresql-policy` / `<instance>-redis-policy`, restricting DB/Redis to the agent pod. |
+| `rbac.enabled` | `false` | Cluster-read + namespace-write RBAC for the agent ServiceAccount. Opt-in: none of the current live instances have this bound. |
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | Only rendered when `hermes.service.type: NodePort`. |
+| `tests.enabled` | `true` | The `helm test` smoke pod (TCP checks against this release's own Services). |
+| `networkPolicy.allowTests` | `true` | Lets the `helm test` smoke pod through to Postgres/Redis. Without it the NetworkPolicy blocks the test and `helm test` can never pass. Set `false` on an instance whose live NetworkPolicy must stay byte-identical through a takeover. |
+| `hermes.podAnnotations` / `postgresql.` / `redis.` / `cloudflared.` / `terminal.` | `{}` | Extra `spec.template.metadata.annotations`. Exists to **reproduce** what is already live: a past `kubectl rollout restart` leaves a `kubectl.kubernetes.io/restartedAt` stamp there, and because that stamp is part of the pod-template hash, dropping it on takeover would roll the Deployment. |
+| `placeholdersStrict` | `true` | Fail the render if any `__NAME__` placeholder is left unsubstituted (see [Placeholders](#placeholders-credentials-that-live-inside-a-pod-template)). |
 
 ### Preview / diff before applying
 
 ```bash
-helm lint .
-helm template hermes . -f my-values.yaml | less
+helm lint . -f my-values.yaml --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x
+helm template hermes . -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=x,placeholders.DASHBOARD_PASSWORD=x | less
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # if helm-diff plugin installed
 ```
 
@@ -515,6 +554,53 @@ gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5.3-c
 
 ---
 
+## Uninstall
+
+```bash
+helm uninstall hermes -n hermes
+```
+
+That removes only the stateless objects this release owns: the agent /
+PostgreSQL / Redis / terminal / cloudflared Deployments, their Services, the
+ConfigMaps, the `<instance>-disk-cleanup` CronJob, the NetworkPolicies, the
+Ingress and the terminal's ServiceAccount / Role / RoleBinding.
+
+**Data is kept.** With `keepOnUninstall: true` (the default) the chart stamps
+`helm.sh/resource-policy: keep` on everything that holds state, and Helm then
+refuses to delete it:
+
+- the three PVCs — `<instance>-data` (agent), `<instance>-postgresql-pvc`,
+  `<instance>-redis-pvc`;
+- every Secret the chart created itself (only with `secrets.create: true`:
+  `<instance>-secrets`, `cf-secrets`). With the default
+  `secrets.create: false` the Secrets are not part of the release at all, so
+  an uninstall cannot touch them either way;
+- a `Namespace` the chart rendered. A namespace equal to `-n` is never
+  rendered, so the release namespace can never be deleted by an uninstall.
+
+Check it on a live release before you rely on it:
+
+```bash
+kubectl -n hermes get pvc \
+  -o custom-columns='NAME:.metadata.name,KEEP:.metadata.annotations.helm\.sh/resource-policy'
+```
+
+Re-installing with the same `instance` re-attaches those PVCs, so the agent
+workspace, the database and the Redis AOF come back as they were.
+
+To delete the data too, do it explicitly — nothing in this chart will do it
+for you:
+
+```bash
+kubectl -n hermes delete pvc hermes-data hermes-postgresql-pvc hermes-redis-pvc
+# Longhorn's "longhorn" class is Retain: the PVs stay Released until you delete them as well.
+```
+
+`keepOnUninstall: false` drops the annotation everywhere. Only do that for a
+throwaway test release you want to disappear completely.
+
+---
+
 ## Custom Docker Image
 
 The custom Dockerfile (`docker/Dockerfile.hermes-agent`) extends the base image with 7 layers:
@@ -545,30 +631,91 @@ docker push <registry>/hermes-agent-custom:latest
 
 ## Multi-Instance Deployment
 
-Each instance runs in an isolated Kubernetes namespace with its own:
-- Persistent volume (5Gi Longhorn PVC by default)
-- PostgreSQL + Redis
-- Cloudflare Tunnel
-- Helm release name
+**One Helm release == one Hermes instance.** Object names (`<instance>`,
+`<instance>-postgresql`, `<instance>-postgresql-svc`, ...) are derived from
+the `instance` value, not the release name or the namespace — so several
+releases can share one namespace, each with its own `instance`, without
+colliding. (The one namespace-wide exception is `cloudflared`/`cf-secrets`:
+a namespace has at most one Cloudflare Tunnel regardless of how many Hermes
+instances live in it — a second instance in the same namespace must set
+`cloudflared.enabled: false`.)
 
-### Deploy New Instance
-
-Because everything is namespaced through `.Values.namespace.name`, you can deploy
-tenant B alongside tenant A by installing a second release into a second namespace:
+### Deploy a brand-new instance
 
 ```bash
-helm install hermes-tenant-a . \
-  -n tenant-a-hermes --create-namespace \
-  -f tenant-a-values.yaml
+helm install hermes-tenant-a . -n tenant-a-hermes --create-namespace \
+  --set instance=hermes -f tenant-a-values.yaml
 
-helm install hermes-tenant-b . \
-  -n tenant-b-hermes --create-namespace \
-  -f tenant-b-values.yaml
+helm install hermes-tenant-b . -n tenant-a-hermes \
+  --set instance=tenant-b -f tenant-b-values.yaml   # shares tenant-a-hermes's namespace
 ```
 
-Each `values.yaml` should set its own `namespace.name`, `cloudflare.domain`, and
-secrets. NetworkPolicies, RBAC, and CronJobs are automatically scoped to that
-namespace by the templates.
+Each values file sets its own `instance`, `namespace.name`, `cloudflare.domain`,
+and (for a second instance in a shared namespace) `cloudflared.enabled: false`.
+
+### Take over an existing hand-managed instance
+
+`deploy/woow-k3s/<namespace>-<instance>.yaml` restates the values needed to
+reproduce one of this repo's own live instances exactly (no secrets — those
+already exist as Secrets in the cluster):
+
+| File | Namespace | Instance | Notes |
+|------|-----------|----------|-------|
+| `deploy/woow-k3s/hermes-hermes.yaml` | `hermes` | `hermes` | Full stack: postgres, redis, cloudflared, terminal, disk-cleanup, ingress. |
+| `deploy/woow-k3s/eugenechen-hermes-hermes.yaml` | `eugenechen-hermes` | `hermes` | Disabled (`replicaCount: 0`) legacy two-container agent+webui pod. |
+| `deploy/woow-k3s/cindytech-cindytech1.yaml` | `cindytech` | `cindytech1` | Shares a namespace with an unrelated Odoo/n8n stack; `cloudflared` stays off — that tunnel belongs to Odoo. |
+
+```bash
+helm upgrade --install hermes . -n hermes \
+  -f deploy/woow-k3s/hermes-hermes.yaml --take-ownership \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+Rendering a `deploy/woow-k3s/*.yaml` file reproduces its live object graph
+field-for-field (verify with `scripts/check-drift.sh`), so `--take-ownership`
+adopts the existing objects without restarting anything.
+
+That includes anything a past `kubectl rollout restart` left behind: the
+stamp it writes to `spec.template.metadata.annotations` is part of the
+pod-template hash, so an instance file has to replay it verbatim
+(`<component>.podAnnotations`) or the takeover rolls that Deployment. Three
+of the live Deployments carry such a stamp and their instance files set it.
+
+### Placeholders: credentials that live inside a pod template
+
+A few live objects carry a credential as a **plain value inside the pod
+template** rather than a Secret reference — a dashboard basic-auth password,
+the legacy webui password, a Postgres password set as a literal env var, a
+Cloudflare tunnel token passed as a `--token` CLI arg. Two rules collide
+there: such a value must never be committed, *and* a takeover has to render
+the pod template byte-identical or every pod restarts.
+
+So the committed values carry `__NAME__` tokens and the real values are
+supplied at apply time — piped in, never written to a file:
+
+```bash
+--set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+| Placeholder | Used by |
+|-------------|---------|
+| `DOMAIN` | `hermes.config.HERMES_DOMAIN` / `HERMES_BASE_URL` and the Ingress host, in the chart defaults |
+| `DASHBOARD_PASSWORD` | `hermes.dashboardAuth.password` (all instances with the dashboard enabled) |
+| `WEBUI_PASSWORD` | the legacy `hermes-webui` sidecar (`eugenechen-hermes`, `cindytech1`) |
+| `POSTGRES_PASSWORD` | `eugenechen-hermes`, whose Postgres password is a plain env var |
+| `MINIMAX_API_KEY` | `eugenechen-hermes`, whose webui sidecar bakes the key into its `args` |
+| `CF_TUNNEL_TOKEN` | `eugenechen-hermes`, whose tunnel takes the token as a CLI arg |
+
+`placeholdersStrict` (default `true`) fails the render if any `__NAME__` is
+left unsubstituted, so a takeover can never silently ship the literal token
+as somebody's password — which would also change the pod template and
+restart the pod. Each instance file's header lists exactly which placeholders
+it needs.
+
+`__INSTANCE__` is implicit and always substituted with `instance`, which is
+how the chart defaults name this release's own objects
+(`__INSTANCE__-secrets`, `__INSTANCE__-config`, `__INSTANCE__-postgresql-svc`)
+instead of hardcoding one instance's names.
 
 ---
 

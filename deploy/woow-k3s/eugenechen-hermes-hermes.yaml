@@ -1,0 +1,208 @@
+# Instance values for the live "hermes" release in namespace
+# "eugenechen-hermes". This is the oldest, sidecar-era shape still running:
+# a disabled (replicas: 0, MUST STAY 0) two-container agent+webui pod,
+# ephemeral (no-PVC) Postgres/Redis, Services with no labels at all, and a
+# Cloudflare Tunnel configured with the token as a literal CLI arg instead
+# of a Secret (see cloudflared.tokenArg below — do not "fix" that on
+# takeover, it would restart the tunnel pod under a new pod-template hash
+# for no operational gain; tracked as a follow-up instead).
+#
+# FIVE credentials live as plain values inside these objects and are
+# therefore NOT committed — they are `__NAME__` placeholder tokens, supplied
+# at apply time and piped in, never written to a file. The render fails
+# loudly if any is missing (placeholdersStrict), so a takeover can never
+# silently ship a literal "__DASHBOARD_PASSWORD__" and restart the pod:
+#
+#   helm upgrade --install eugenechen-hermes-hermes . -n eugenechen-hermes \
+#     -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml --take-ownership \
+#     --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS" \
+#     --set-string placeholders.WEBUI_PASSWORD="$WEBUIPASS" \
+#     --set-string placeholders.POSTGRES_PASSWORD="$PGPASS" \
+#     --set-string placeholders.MINIMAX_API_KEY="$MINIMAX_KEY" \
+#     --set-string placeholders.CF_TUNNEL_TOKEN="$TUNNEL_TOKEN"
+
+instance: hermes
+
+
+secrets:
+  create: false
+
+hermes:
+  replicaCount: 0 # MUST STAY 0 — this instance is intentionally disabled.
+  # Replay of the live pod-template annotation left by a past `kubectl
+  # rollout restart`; part of the pod-template hash.
+  podAnnotations:
+    kubectl.kubernetes.io/restartedAt: "2026-06-27T00:10:00+08:00"
+  # No labels anywhere on this instance: neither the Deployments nor the
+  # Services carry any (it predates the labelling convention).
+  renderLabels: false
+  svcRenderLabels: false
+  serviceAccountName: ""
+  serviceAccount:
+    create: false
+  # null (not {}): {} would deep-merge and leave fsGroup:0 in place.
+  podSecurityContext: null
+  probes:
+    enabled: false
+  configMap:
+    enabled: false
+  sharedVolumes:
+    enabled: false
+  persistence:
+    claimName: hermes-data
+    storageClassName: longhorn
+    size: 10Gi
+  env:
+    - {name: HERMES_DASHBOARD, value: "1"}
+    - {name: HERMES_DASHBOARD_INSECURE, value: "1"}
+    - {name: HERMES_DASHBOARD_TUI, value: "1"}
+    - {name: HERMES_TUI_DIR, value: /opt/hermes/ui-tui}
+    - {name: HERMES_UID, value: "1000"}
+    - {name: HERMES_GID, value: "1000"}
+    - {name: API_SERVER_ENABLED, value: "true"}
+    - {name: API_SERVER_HOST, value: "0.0.0.0"}
+    - name: API_SERVER_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+    - {name: API_SERVER_CORS_ORIGINS, value: "*"}
+    - {name: GATEWAY_ALLOW_ALL_USERS, value: "true"}
+    - name: MINIMAX_API_KEY
+      valueFrom: {secretKeyRef: {name: hermes-secrets, key: MINIMAX_API_KEY}}
+    - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
+  # password stays at the chart default __DASHBOARD_PASSWORD__ — supplied at
+  # apply time, see the header of this file.
+  dashboardAuth:
+    enabled: true
+    username: admin
+  extraEnvTail: []
+  lifecyclePostStart: >-
+    sed -i '/^  - hermes-cli$/d' /opt/data/config.yaml 2>/dev/null;
+    rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null;
+    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes 2>/dev/null;
+    rm -rf /opt/hermes/skills/apple /opt/hermes/skills/gaming
+    /opt/hermes/skills/email /opt/hermes/skills/social-media
+    /opt/hermes/skills/yuanbao /opt/hermes/skills/media/heartmula
+    /opt/hermes/skills/media/songsee /opt/hermes/skills/media/spotify
+    /opt/hermes/skills/media/youtube-content
+    /opt/hermes/skills/smart-home/openhue 2>/dev/null;
+    SITE=$(/opt/hermes/.venv/bin/python3 -c 'import site;print(site.getsitepackages()[0])' 2>/dev/null)
+    && pip install --break-system-packages -q --target="$SITE" ddgs 2>/dev/null || true
+  # Legacy hermes-webui sidecar — the pre-single-container architecture.
+  # Reproduced field-for-field from the live container; the only values
+  # not committed verbatim are the real MiniMax key baked into `args` and
+  # the two plaintext passwords, which are placeholder tokens here.
+  extraContainers:
+    - name: hermes-webui
+      image: ghcr.io/nesquena/hermes-webui:latest
+      imagePullPolicy: Always
+      command: ["sh", "-c"]
+      args:
+        - "mkdir -p /home/hermeswebui/.hermes && echo MINIMAX_API_KEY=__MINIMAX_API_KEY__ > /home/hermeswebui/.hermes/.env && chmod 644 /home/hermeswebui/.hermes/.env && for i in $(seq 1 90); do HTTP=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8642/ 2>/dev/null); [ \"$HTTP\" = \"200\" ] || [ \"$HTTP\" = \"404\" ] && break; sleep 2; done && rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null && if [ -f /hermeswebui_init.bash ]; then exec /hermeswebui_init.bash; fi && cd /app && python server.py"
+      env:
+        - {name: HERMES_WEBUI_CHAT_BACKEND, value: "gateway"}
+        - {name: HERMES_WEBUI_GATEWAY_USE_RUNS_API, value: "1"}
+        - name: HERMES_WEBUI_GATEWAY_API_KEY
+          valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+        - {name: HERMES_WEBUI_RUNNER_BASE_URL, value: "http://localhost:8642"}
+        - name: HERMES_WEBUI_RUNNER_API_KEY
+          valueFrom: {secretKeyRef: {name: hermes-secrets, key: API_SERVER_KEY}}
+        - {name: HERMES_API_URL, value: "http://localhost:8642"}
+        - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
+        - {name: HERMES_WEBUI_PORT, value: "8787"}
+        - {name: HERMES_WEBUI_PASSWORD, value: "__WEBUI_PASSWORD__"}
+        - {name: HERMES_GATEWAY_URL, value: "http://localhost:8642"}
+        - {name: HERMES_BASE_URL, value: "https://eugenechen-hermes.woowtech.io"}
+        - {name: HERMES_DOMAIN, value: "eugenechen-hermes.woowtech.io"}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "admin"}
+        - {name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD, value: "__DASHBOARD_PASSWORD__"}
+        - {name: HERMES_WEBUI_STATE_DIR, value: "/home/hermeswebui/.hermes/webui"}
+        - {name: HERMES_HOME, value: "/home/hermeswebui/.hermes"}
+      ports:
+        - {containerPort: 8787, name: webui, protocol: TCP}
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: "500m", memory: 1Gi}
+  config:
+    HERMES_DOMAIN: eugenechen-hermes.woowtech.io
+    HERMES_BASE_URL: https://eugenechen-hermes.woowtech.io
+    HERMES_AGENT_PORT: "8642"
+    HERMES_WEBUI_PORT: "8787"
+    POSTGRES_HOST: hermes-postgresql-svc
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: hermes
+    POSTGRES_USER: hermes
+    REDIS_HOST: hermes-redis-svc
+    REDIS_PORT: "6379"
+    WANTED_UID: "1000"
+
+postgresql:
+  image: {repository: postgres, tag: 16-alpine, pullPolicy: IfNotPresent}
+  containerName: postgres
+  renderLabels: false
+  svcRenderLabels: false
+  probes:
+    enabled: false
+  containerPortName: ""
+  svcPortName: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  persistence:
+    enabled: false
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  # This live instance stores the password as a plain env value, not a
+  # Secret. Placeholder here; real value supplied at apply time.
+  env:
+    - {name: POSTGRES_DB, value: hermes}
+    - {name: POSTGRES_USER, value: hermes}
+    - {name: POSTGRES_PASSWORD, value: __POSTGRES_PASSWORD__}
+
+redis:
+  renderLabels: false
+  svcRenderLabels: false
+  containerPortName: ""
+  svcPortName: ""
+  commandOverride:
+    enabled: false
+  probes:
+    enabled: false
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  persistence:
+    enabled: false
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+
+cloudflared:
+  renderLabels: false
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}
+  args: [tunnel, --no-autoupdate, run]
+  # Real tunnel token supplied at apply time — see file header.
+  tokenArg: __CF_TUNNEL_TOKEN__
+  probes:
+    enabled: false
+  lifecyclePreStop: false
+  # null (not {}): {} would deep-merge and leave the chart default
+  # nodeSelector in place; null is required to actually clear it.
+  nodeSelector: null
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+terminal:
+  enabled: false
+diskCleanup:
+  enabled: false
+networkPolicy:
+  enabled: false
+cloudflare:
+  domain: eugenechen-hermes.woowtech.io
+  ingress:
+    enabled: false
+rbac:
+  enabled: false

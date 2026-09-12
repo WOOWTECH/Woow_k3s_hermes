@@ -1,0 +1,266 @@
+name: chart
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: {}
+
+env:
+  # Dummy values only: exercises templates/secrets.yaml without any real key.
+  SECRETS: secrets.create=true,secrets.API_SERVER_KEY=x,secrets.MINIMAX_API_KEY=x,secrets.POSTGRES_PASSWORD=x,secrets.TTYD_PASSWORD=x,secrets.CF_API_TOKEN=x,secrets.CF_TUNNEL_TOKEN=x
+  # Dummy values only: every credential that lives as a plain value inside a
+  # pod template is a __NAME__ placeholder in the committed values.
+  PH: placeholders.DOMAIN=example.invalid,placeholders.DASHBOARD_PASSWORD=x,placeholders.WEBUI_PASSWORD=x,placeholders.POSTGRES_PASSWORD=x,placeholders.MINIMAX_API_KEY=x,placeholders.CF_TUNNEL_TOKEN=x
+  KUBECONFORM_VERSION: v0.6.7
+  KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.5
+
+      - name: helm lint
+        run: |
+          helm lint . --set instance=hermes --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/hermes-hermes.yaml --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml --set-string "$PH"
+          helm lint . -f deploy/woow-k3s/cindytech-cindytech1.yaml --set-string "$PH"
+          helm lint . --set instance=hermes --set "$SECRETS" --set-string "$PH"
+
+      - name: helm template (every values combination)
+        run: |
+          mkdir -p /tmp/r
+          helm template hermes . -n hermes -f deploy/woow-k3s/hermes-hermes.yaml \
+            --set-string "$PH"                                                  > /tmp/r/hermes-instance.yaml
+          helm template eugenechen-hermes-hermes . -n eugenechen-hermes \
+            -f deploy/woow-k3s/eugenechen-hermes-hermes.yaml \
+            --set-string "$PH"                                                  > /tmp/r/eugenechen-instance.yaml
+          helm template cindytech-cindytech1 . -n cindytech \
+            -f deploy/woow-k3s/cindytech-cindytech1.yaml \
+            --set-string "$PH"                                                  > /tmp/r/cindytech1-instance.yaml
+          helm template hermes . -n hermes --set instance=hermes \
+            --set-string "$PH"                                                  > /tmp/r/default-ns.yaml
+          # namespace.name != release namespace: the only combination that renders
+          # templates/namespace.yaml (empty name follows -n and is skipped by design).
+          helm template hermes . -n hermes --set instance=hermes --set namespace.name=other-ns --set-string "$PH" > /tmp/r/other-ns.yaml
+          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set-string "$PH" > /tmp/r/secrets.yaml
+          helm template hermes . -n hermes --set instance=hermes --set "$SECRETS" --set-string "$PH" --set keepOnUninstall=false > /tmp/r/no-keep.yaml
+          helm template hermes . -n hermes --set instance=hermes \
+            --set cloudflared.enabled=false,terminal.enabled=false,diskCleanup.enabled=false,networkPolicy.enabled=false,cloudflare.ingress.enabled=false,postgresql.enabled=false,redis.enabled=false \
+            --set-string "$PH"                                                  > /tmp/r/minimal.yaml
+          # The shape of a test install: own namespace, disposable storage, no tunnel.
+          helm template ht-test . -n ht-hermes --set instance=ht-test \
+            --set storageClassName=longhorn-delete,hermes.persistence.storageClassName=longhorn-delete \
+            --set postgresql.persistence.storageClassName=longhorn-delete,redis.persistence.storageClassName=longhorn-delete \
+            --set cloudflared.enabled=false,terminal.enabled=false,diskCleanup.enabled=false,networkPolicy.enabled=false,cloudflare.ingress.enabled=false \
+            --set "$SECRETS" --set-string "$PH"                                 > /tmp/r/test-install.yaml
+          # rbac.enabled is opt-in everywhere; prove it still renders cleanly.
+          helm template hermes . -n hermes --set instance=hermes --set rbac.enabled=true --set-string "$PH" > /tmp/r/rbac-on.yaml
+          wc -l /tmp/r/*.yaml
+
+      - name: Every template is tracked and renders
+        run: |
+          # An unanchored .helmignore/.gitignore pattern once silently dropped
+          # templates/tests/smoke.yaml (the helm-test hook pod) from the chart.
+          for f in $(find templates -type f); do
+            if git check-ignore --no-index -q "$f"; then echo "::error::$f is matched by .gitignore"; exit 1; fi
+          done
+          python3 - <<'PYEOF'
+          import subprocess
+          out = subprocess.run(["helm", "package", ".", "--destination", "/tmp"], capture_output=True, text=True)
+          print(out.stdout, out.stderr)
+          assert out.returncode == 0, "helm package failed"
+          import tarfile, glob
+          tf = tarfile.open("/tmp/hermes-2.0.0.tgz")
+          names = {n.split("/", 1)[1] for n in tf.getnames() if "/" in n}
+          for f in glob.glob("templates/**/*.yaml", recursive=True):
+              assert f in names, f"{f} missing from packaged chart (likely .helmignore-excluded)"
+          print("every templates/ file is packaged")
+          PYEOF
+          for f in $(find templates -type f -name '*.yaml'); do
+            grep -q "^# Source: hermes/$f\$" /tmp/r/*.yaml || { echo "::error::$f never renders"; exit 1; }
+          done
+          echo "every template is tracked and renders"
+
+      - name: Every rendered object lands in the release namespace
+        run: |
+          # The namespace footgun: a values file that pins a namespace (at the
+          # top level, or inside an extraServices entry) silently survives
+          # `-n <test-ns>` and writes straight into the live namespace during
+          # a takeover rehearsal. Nothing may escape -n.
+          for f in deploy/woow-k3s/*.yaml; do
+            out=$(helm template t . -n SENTINEL -f "$f" --set-string "$PH" \
+                    | grep '^  namespace:' | sort -u)
+            if [ "$out" != "  namespace: SENTINEL" ]; then
+              echo "::error::$f renders objects outside -n:"; echo "$out"; exit 1
+            fi
+            echo "$f: every object in -n"
+          done
+
+      - name: Pod-template annotations are replayed
+        run: |
+          # A live `kubectl.kubernetes.io/restartedAt` stamp is part of the
+          # pod-template hash: if an instance file declares podAnnotations and
+          # the render drops them, a takeover rolls that Deployment.
+          pip install --quiet pyyaml
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          bad = []
+          RENDER = {"deploy/woow-k3s/hermes-hermes.yaml": "/tmp/r/hermes-instance.yaml",
+                    "deploy/woow-k3s/eugenechen-hermes-hermes.yaml": "/tmp/r/eugenechen-instance.yaml",
+                    "deploy/woow-k3s/cindytech-cindytech1.yaml": "/tmp/r/cindytech1-instance.yaml"}
+          COMPONENT = {"hermes": lambda i: i, "postgresql": lambda i: f"{i}-postgresql",
+                       "redis": lambda i: f"{i}-redis", "cloudflared": lambda i: "cloudflared",
+                       "terminal": lambda i: f"{i}-terminal"}
+          total = 0
+          for vf, rf in RENDER.items():
+              v = yaml.safe_load(open(vf)) or {}
+              inst = v["instance"]
+              deps = {d["metadata"]["name"]: d for d in yaml.safe_load_all(open(rf))
+                      if d and d["kind"] == "Deployment"}
+              for comp, namer in COMPONENT.items():
+                  want = ((v.get(comp) or {}).get("podAnnotations")) or {}
+                  if not want:
+                      continue
+                  total += len(want)
+                  d = deps.get(namer(inst))
+                  if not d:
+                      bad.append(f"{vf}: {comp}.podAnnotations set but {namer(inst)} not rendered"); continue
+                  got = (d["spec"]["template"]["metadata"].get("annotations") or {})
+                  for k, x in want.items():
+                      if got.get(k) != x:
+                          bad.append(f"{vf}: {namer(inst)} pod template lost {k} (got {got.get(k)!r})")
+          if not total:
+              bad.append("no instance declares podAnnotations — the live restartedAt stamps are no longer replayed")
+          sys.exit("\n".join(bad)) if bad else print(f"{total} pod-template annotation(s) replayed")
+          EOF
+
+      - name: Placeholder guard fires
+        run: |
+          # placeholdersStrict must refuse to ship a literal __NAME__ as
+          # somebody's password (which would also change the pod template and
+          # restart the pod on takeover).
+          if out=$(helm template hermes . -n hermes -f deploy/woow-k3s/hermes-hermes.yaml 2>&1); then
+            echo "::error::a missing placeholder rendered anyway"; exit 1
+          fi
+          echo "$out" | grep -q "unsubstituted placeholder" \
+            || { echo "::error::wrong error: $out"; exit 1; }
+          # and no __NAME__ token survives into any render
+          if grep -nE '__[A-Z0-9_]+__' /tmp/r/*.yaml; then
+            echo "::error::a placeholder token leaked into a render"; exit 1
+          fi
+          echo "placeholder guard fires"
+
+      - name: helm test smoke pod actually renders
+        run: |
+          grep -q "kind: Pod" /tmp/r/hermes-instance.yaml
+          grep -qE "helm.sh/hook.*: *test" /tmp/r/hermes-instance.yaml
+          echo "smoke test pod present"
+
+      - name: The MCP admin console is not part of this chart
+        run: |
+          pip install --quiet pyyaml
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          bad = []
+          for f in glob.glob("/tmp/r/*.yaml"):
+              for d in yaml.safe_load_all(open(f)):
+                  if d and ("mcp" in d["metadata"]["name"] or d["metadata"].get("namespace", "").endswith("-mcp")):
+                      bad.append(f"{f}: {d['kind']}/{d['metadata']['name']}")
+          sys.exit("\n".join(bad)) if bad else print("no MCP-admin object rendered")
+          EOF
+
+      - name: kubeconform (schema validation)
+        run: |
+          curl -sSLo /tmp/kc.tgz https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz
+          echo "${KUBECONFORM_SHA256}  /tmp/kc.tgz" | sha256sum -c -
+          tar -xzf /tmp/kc.tgz -C /usr/local/bin kubeconform
+          kubeconform -strict -summary /tmp/r/*.yaml
+
+      - name: Required secrets are enforced
+        run: |
+          if helm template hermes . --set instance=hermes --set secrets.create=true > /dev/null 2>&1; then
+            echo "secrets.create=true rendered without any secret values"; exit 1
+          fi
+          for k in API_SERVER_KEY MINIMAX_API_KEY POSTGRES_PASSWORD TTYD_PASSWORD CF_API_TOKEN CF_TUNNEL_TOKEN; do
+            set_without=$(echo "$SECRETS" | tr ',' '\n' | grep -v "^secrets.$k=" | paste -sd, -)
+            if out=$(helm template hermes . -n hermes --set instance=hermes --set "$set_without" 2>&1); then
+              echo "::error::secrets.$k is not enforced"; exit 1
+            fi
+            echo "$out" | grep -q "secrets.$k is required" || { echo "::error::wrong error for $k: $out"; exit 1; }
+          done
+          echo "required() guards fire"
+          n=$(grep -c '^kind: Secret$' /tmp/r/secrets.yaml || true)
+          [ "$n" -eq 2 ] || { echo "expected 2 Secrets with secrets.create=true, got $n"; exit 1; }
+          echo "secrets.create=true renders both Secrets"
+
+      - name: Keep policy on Namespaces, PVCs and Secrets
+        run: |
+          python3 - <<'EOF'
+          import sys, yaml
+          bad = []
+          def objs(f): return [d for d in yaml.safe_load_all(open(f)) if d]
+          for d in objs("/tmp/r/secrets.yaml") + objs("/tmp/r/default-ns.yaml"):
+              if d["kind"] in ("Namespace", "PersistentVolumeClaim", "Secret"):
+                  if (d["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") != "keep":
+                      bad.append(f"{d['kind']}/{d['metadata']['name']} has no keep policy")
+          for d in objs("/tmp/r/default-ns.yaml"):
+              if d["kind"] == "Namespace" and d["metadata"]["name"] == "hermes":
+                  bad.append("a namespace equal to the release namespace must never be rendered")
+          sys.exit("\n".join(bad)) if bad else print("keep policy present; release namespace not rendered")
+          EOF
+
+      - name: No secrets committed
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          bad = []
+          v0 = yaml.safe_load(open("values.yaml"))
+          s = v0["secrets"]
+          for k, v in s.items():
+              if k not in ("create", "extraEnv") and v:
+                  bad.append(f"values.yaml secrets.{k} must be empty")
+          if s["extraEnv"]:
+              bad.append("values.yaml secrets.extraEnv must be empty")
+          if v0.get("placeholders"):
+              bad.append("values.yaml placeholders must be empty (real values are --set at apply time)")
+          if v0.get("placeholdersStrict") is not True:
+              bad.append("values.yaml placeholdersStrict must default to true")
+          # Credential-shaped literals anywhere in the committed values.
+          import re
+          pat = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_.=-]{30,}|[A-Za-z0-9_-]{40,}\\.[A-Za-z0-9_-]{20,})")
+          for f in ["values.yaml"] + glob.glob("deploy/**/*.yaml", recursive=True):
+              for i, line in enumerate(open(f), 1):
+                  if pat.search(line):
+                      bad.append(f"{f}:{i} looks like a committed credential")
+          for f in glob.glob("deploy/**/*.yaml", recursive=True):
+              v = yaml.safe_load(open(f)) or {}
+              extra = set((v.get("secrets") or {}).keys()) - {"create"}
+              if extra:
+                  bad.append(f"{f}: secret values do not belong in instance values: {sorted(extra)}")
+          for f in glob.glob("/tmp/r/*.yaml"):
+              if "secrets" in f or "rbac-on" in f or "no-keep" in f or "test-install" in f:
+                  continue
+              for d in yaml.safe_load_all(open(f)):
+                  if d and d["kind"] == "Secret":
+                      bad.append(f"{f} must not contain Secrets (secrets.create=false)")
+          for d in yaml.safe_load_all(open("examples/secrets.example.yaml")):
+              for k, v in ((d or {}).get("stringData") or {}).items():
+                  if "REPLACE_ME" not in str(v):
+                      bad.append(f"examples: {d['metadata']['name']}.{k} is not a placeholder")
+              for k, v in ((d or {}).get("data") or {}).items():
+                  if "REPLACE_ME" not in str(v):
+                      bad.append(f"examples: {d['metadata']['name']}.{k} is not a placeholder")
+          sys.exit("\n".join(bad)) if bad else print("no secrets committed")
+          EOF
+
+      - name: Shell scripts parse
+        run: |
+          shopt -s nullglob
+          for f in scripts/*.sh; do bash -n "$f"; done

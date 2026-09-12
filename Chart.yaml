@@ -1,9 +1,14 @@
 apiVersion: v2
 name: hermes
-description: WoowTech Hermes Agent — enterprise AI assistant (Nous Research hermes-agent) deployed on Kubernetes / K3s
+description: >-
+  WoowTech Hermes Agent — enterprise AI assistant (Nous Research
+  hermes-agent) deployed on Kubernetes / K3s. One release reproduces one
+  live Hermes instance; several releases (one per instance) can share a
+  namespace. hermes-mcp-admin is a separate chart, not part of this one.
 type: application
-version: 1.0.0
+version: 2.0.0
 appVersion: "0.17.0"
+kubeVersion: ">=1.27.0-0"
 keywords:
   - hermes
   - ai-assistant

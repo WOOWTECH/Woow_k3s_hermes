@@ -1,23 +1,26 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $instance := include "hermes.instance" . }}
+{{- $agentLabel := .Values.networkPolicy.agentSelectorLabel | default $instance }}
 {{- if .Values.postgresql.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ .Values.namespace.name }}-postgresql-policy
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-postgresql-policy
+  namespace: {{ include "hermes.ns" . }}
   labels:
     app.kubernetes.io/part-of: hermes
 spec:
   podSelector:
     matchLabels:
-      app: hermes-postgresql
+      app: {{ $instance }}-postgresql
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              app: hermes-agent
+              app: {{ $agentLabel }}
+        {{- include "hermes.netpolTestFrom" . }}
       ports:
         - protocol: TCP
           port: 5432
@@ -27,21 +30,22 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ .Values.namespace.name }}-redis-policy
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $instance }}-redis-policy
+  namespace: {{ include "hermes.ns" . }}
   labels:
     app.kubernetes.io/part-of: hermes
 spec:
   podSelector:
     matchLabels:
-      app: hermes-redis
+      app: {{ $instance }}-redis
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              app: hermes-agent
+              app: {{ $agentLabel }}
+        {{- include "hermes.netpolTestFrom" . }}
       ports:
         - protocol: TCP
           port: 6379

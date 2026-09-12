@@ -1,0 +1,68 @@
+{{- /*
+Read-only `helm test` smoke pod: proves this release's own Services resolve
+and that every enabled component's port accepts a TCP connection (busybox
+`nc -z`). It does NOT authenticate or issue a query — it is a reachability
+check, not a pg_isready/redis-cli health check. Never writes anything.
+*/ -}}
+{{- if .Values.tests.enabled }}
+{{- $instance := include "hermes.instance" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $instance }}-smoke-test
+  namespace: {{ include "hermes.ns" . }}
+  labels:
+    # Deliberately NOT `app: <instance>` — that is the agent Service's
+    # selector and this pod would start receiving real traffic. The
+    # NetworkPolicy allows these two labels instead (networkPolicy.allowTests).
+    app.kubernetes.io/component: smoke-test
+    app.kubernetes.io/instance: {{ $instance }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: "busybox:1.36"
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          fail=0
+          # Retry: this pod lives for seconds, and the cluster's NetworkPolicy
+          # controller needs a moment to publish its identity to the node that
+          # runs Postgres/Redis. A single-shot nc fails that race.
+          tries={{ .Values.tests.retries }}
+          check() {
+            echo "-- checking $1:$2 --"
+            i=1
+            while [ "$i" -le "$tries" ]; do
+              if nc -z -w3 "$1" "$2"; then
+                echo "OK: $1:$2 reachable (attempt $i)"
+                return 0
+              fi
+              i=$((i+1))
+              sleep {{ .Values.tests.retryDelaySeconds }}
+            done
+            echo "FAIL: $1:$2 unreachable after $tries attempts"
+            fail=1
+          }
+          check {{ $instance }}-agent-svc {{ .Values.hermes.service.gatewayPort }}
+          check {{ $instance }}-agent-svc {{ .Values.hermes.service.dashboardPort }}
+          {{- if .Values.postgresql.enabled }}
+          check {{ $instance }}-postgresql-svc {{ .Values.postgresql.service.port }}
+          {{- end }}
+          {{- if .Values.redis.enabled }}
+          check {{ $instance }}-redis-svc {{ .Values.redis.service.port }}
+          {{- end }}
+          {{- if .Values.terminal.enabled }}
+          check {{ $instance }}-terminal-svc {{ .Values.terminal.service.port }}
+          {{- end }}
+          if [ "$fail" -ne 0 ]; then
+            echo "SMOKE TEST FAILED"
+            exit 1
+          fi
+          echo "SMOKE TEST PASSED"
+{{- end }}
