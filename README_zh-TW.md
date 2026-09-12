@@ -385,37 +385,52 @@ URL:  https://<PREFIX>-hermes-terminal.woowtech.io
 
 ### 快速開始（Helm）
 
+一個 Helm release 對應一個 Hermes 實例：`instance` 決定該 release 底下每個物件的名稱
+（`hermes`、`hermes-postgresql`、...），所以多個 release 只要 `instance` 不同就能共用同一個
+namespace。預設情況下 Secret **只會被引用、不會被這個 chart 產生** —— 請先自行建立好，
+key 清單見 `examples/secrets.example.yaml`。
+
 ```bash
-# 1. 複製本倉庫
+# 1. 複製本倉庫（或使用 GitHub release 的 tarball）
 git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
 cd Woow_k3s_hermes
 
-# 2. 建立含機密與網域的 values override
+# 2. 建立這個實例需要的 Secret（完整 key 清單見 examples/secrets.example.yaml）
+#    絕對不要把填好真實值的檔案提交進 git。
+kubectl create namespace hermes
+kubectl -n hermes create secret generic hermes-secrets \
+  --from-literal=API_SERVER_KEY="$(openssl rand -hex 24)" \
+  --from-literal=MINIMAX_API_KEY="<your-minimax-key>" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=TTYD_PASSWORD="$(openssl rand -hex 16)"
+# 只有在 cloudflared.enabled（預設開啟）時才需要：
+kubectl -n hermes create secret generic cf-secrets \
+  --from-literal=CF_API_TOKEN="<cloudflare-api-token>" \
+  --from-literal=CF_TUNNEL_TOKEN="<cloudflare-tunnel-token>"
+
+# 3. 建立 values override —— 實例名稱、網域、Dashboard 密碼
 cat > my-values.yaml <<'EOF'
+instance: hermes
 namespace:
   name: hermes
-
-secrets:
-  API_SERVER_KEY:     "<generate-a-strong-key>"
-  MINIMAX_API_KEY:    "<your-minimax-key>"
-  POSTGRES_PASSWORD:  "<pg-password>"
-  TTYD_PASSWORD:      "<ttyd-basic-auth>"
-  CF_API_TOKEN:       "<cloudflare-api-token>"
-  CF_TUNNEL_TOKEN:    "<cloudflare-tunnel-token>"
-
 cloudflare:
   domain: hermes.example.com
-  ingress:
-    enabled: true
-    className: traefik
+hermes:
+  dashboardAuth:
+    password: "<一組夠強的 Dashboard 密碼>"
 EOF
 
-# 3. 安裝（會自動建立 namespace 與所有資源）
-helm install hermes . -n hermes --create-namespace -f my-values.yaml
+# 4. 安裝
+helm install hermes . -n hermes -f my-values.yaml
 
-# 4. 觀察啟動狀態
+# 5. 觀察啟動狀態並驗證
 kubectl -n hermes get pods -w
+helm test hermes -n hermes
 ```
+
+若要接手既有、手動管理的實例而非全新安裝，見 `deploy/woow-k3s/` 底下的各實例 values
+檔，並在 `helm upgrade --install` 加上 `--take-ownership`——詳見下方
+[多實例部署](#多實例部署)。
 
 ### 功能開關（`values.yaml`）
 
@@ -423,15 +438,18 @@ kubectl -n hermes get pods -w
 
 | 開關 | 預設 | 產出內容 |
 |------|------|----------|
-| `namespace.create` | `true` | `Namespace` 物件本身。 |
-| `postgresql.enabled` | `true` | PostgreSQL 15 Deployment + Service + PVC。 |
-| `redis.enabled` | `true` | Redis 7-alpine Deployment + Service + PVC。 |
-| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment（需 `CF_TUNNEL_TOKEN`）。 |
-| `cloudflare.ingress.enabled` | `true` | 將 `<domain>/api` 導向 gateway 的 `Ingress`。 |
-| `terminal.enabled` | `true` | ttyd 瀏覽器終端（SA/Role/RoleBinding + Deployment + Service）。 |
-| `diskCleanup.enabled` | `true` | 每晚清理 agent PVC 上的 journal 與 dump 檔的 CronJob。 |
-| `networkPolicy.enabled` | `true` | 限制 `hermes-agent` 以外 Pod 無法連線資料庫的 NetworkPolicy。 |
+| `namespace.create` | `true` | `Namespace` 物件本身（若等於 `-n` 指定的 release namespace 則不輸出）。 |
+| `secrets.create` | `false` | 從 values 產生 `<instance>-secrets` 與 `cf-secrets`（有 `required()` 把關）。預設關閉——Secret 是被引用而非由 chart 擁有。 |
+| `postgresql.enabled` | `true` | Postgres Deployment + Service + PVC。 |
+| `redis.enabled` | `true` | Redis Deployment + Service + PVC。 |
+| `cloudflared.enabled` | `true` | Cloudflare Tunnel Deployment（需要 `cf-secrets`）。不隨 instance 命名——一個 namespace 最多一條 tunnel，同一 namespace 的第二個實例必須關閉此項。 |
+| `cloudflare.ingress.enabled` | `true` | 將 `<domain>/api` 導向 gateway 的 `<instance>-ingress`。 |
+| `terminal.enabled` | `true` | ttyd 瀏覽器終端（SA/Role/RoleBinding + Deployment + Service），命名為 `<instance>-terminal*`。 |
+| `diskCleanup.enabled` | `true` | 每晚清理 agent PVC 上 journal 與 dump 檔的 `<instance>-disk-cleanup` CronJob。 |
+| `networkPolicy.enabled` | `true` | `<instance>-postgresql-policy` / `<instance>-redis-policy`，限制只有 agent pod 能連線資料庫。 |
+| `rbac.enabled` | `false` | 給 agent ServiceAccount 的叢集唯讀 + 命名空間讀寫 RBAC。預設關閉：目前三個正式實例都沒有掛這組權限。 |
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | 只在 `hermes.service.type: NodePort` 時才輸出。 |
+| `tests.enabled` | `true` | `helm test` 煙霧測試 Pod（對本 release 自己的 Service 做 TCP 檢查）。 |
 
 ### 套用前預覽 / diff
 
@@ -515,29 +533,56 @@ docker push <registry>/hermes-agent-custom:latest
 
 ## 多實例部署
 
-每個實例運行在獨立的 Kubernetes 命名空間中，擁有：
-- 獨立持久化磁碟區（預設 5Gi Longhorn PVC）
-- 獨立 PostgreSQL + Redis
-- 獨立 Cloudflare Tunnel
-- 獨立 Helm release 名稱
+**一個 Helm release 對應一個 Hermes 實例。** 物件名稱（`<instance>`、
+`<instance>-postgresql`、`<instance>-postgresql-svc` ...）是由 `instance`
+這個值決定，而不是 release 名稱或 namespace——所以多個 release 只要
+`instance` 不同，就能共用同一個 namespace 而不會互相碰撞。（唯一以
+namespace 為單位、不隨 instance 命名的例外是 `cloudflared`／
+`cf-secrets`：一個 namespace 最多只有一條 Cloudflare Tunnel，不論裡面
+住了幾個 Hermes 實例——同一 namespace 的第二個實例必須把
+`cloudflared.enabled` 設為 `false`。）
 
-### 部署新實例
-
-由於所有資源都透過 `.Values.namespace.name` 命名空間化，只要在新的 namespace
-安裝第二個 release，即可讓租戶 B 與租戶 A 並存：
+### 部署全新實例
 
 ```bash
-helm install hermes-tenant-a . \
-  -n tenant-a-hermes --create-namespace \
-  -f tenant-a-values.yaml
+helm install hermes-tenant-a . -n tenant-a-hermes --create-namespace \
+  --set instance=hermes -f tenant-a-values.yaml
 
-helm install hermes-tenant-b . \
-  -n tenant-b-hermes --create-namespace \
-  -f tenant-b-values.yaml
+helm install hermes-tenant-b . -n tenant-a-hermes \
+  --set instance=tenant-b -f tenant-b-values.yaml   # 共用 tenant-a-hermes 的 namespace
 ```
 
-每個 `values.yaml` 需分別設定自己的 `namespace.name`、`cloudflare.domain` 與
-機密。NetworkPolicy、RBAC 與 CronJob 都會自動歸屬於各自的 namespace。
+每個 values 檔要分別設定自己的 `instance`、`namespace.name`、
+`cloudflare.domain`，若是共用 namespace 的第二個實例還要加上
+`cloudflared.enabled: false`。
+
+### 接手既有、手動管理的實例
+
+`deploy/woow-k3s/<namespace>-<instance>.yaml` 重現了本倉庫三個正式實例其中
+一個的完整設定（不含機密——那些已經以 Secret 形式存在叢集裡）：
+
+| 檔案 | Namespace | Instance | 備註 |
+|------|-----------|----------|------|
+| `deploy/woow-k3s/hermes-hermes.yaml` | `hermes` | `hermes` | 完整組合：postgres、redis、cloudflared、terminal、disk-cleanup、ingress。 |
+| `deploy/woow-k3s/eugenechen-hermes-hermes.yaml` | `eugenechen-hermes` | `hermes` | 已停用（`replicaCount: 0`）的舊版雙容器 agent+webui pod。 |
+| `deploy/woow-k3s/cindytech-cindytech1.yaml` | `cindytech` | `cindytech1` | 與客戶另一套 Odoo/n8n 共用 namespace；`cloudflared` 保持關閉——那條 tunnel 屬於 Odoo。 |
+
+```bash
+helm upgrade --install hermes . -n hermes \
+  -f deploy/woow-k3s/hermes-hermes.yaml \
+  --set-string hermes.dashboardAuth.password="$(正式環境目前的 Dashboard 密碼)" \
+  --take-ownership
+```
+
+少數幾個實例檔案會刻意把一兩個值留白並附註說明（正式環境的物件裡把密碼或
+tunnel token 直接寫死在明文欄位，而非放進 Secret）——這個 chart 無論如何都
+不會把真實機密值提交進 git。要真正接手這些實例前，請在套用當下透過
+`--set-string` 帶入真實值（直接管線傳入，絕對不要寫成檔案）；哪個欄位需要
+這麼做，檔案裡的註解都有寫。
+
+套用 `deploy/woow-k3s/*.yaml` 會逐欄位重現正式環境現有的物件圖（已用
+`scripts/check-drift.sh` 驗證過），所以 `--take-ownership` 只是接手既有物件，
+不會讓任何東西重新啟動。
 
 ---
 
