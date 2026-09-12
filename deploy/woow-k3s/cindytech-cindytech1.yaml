@@ -21,8 +21,10 @@ hermes:
     repository: jcr-prod.woowtech.io/woow-paas-docker-local/hermes-agent-custom
     tag: aorus-20260727
     pullPolicy: IfNotPresent
-  extraLabels: {}
-  svcExtraLabels: {}
+  # null (not {}): {} would deep-merge and leave the chart default labels
+  # (component/part-of) in place; null is required to actually clear them.
+  extraLabels: null
+  svcExtraLabels: null
   imagePullSecrets:
     - name: jfrog-registry
   persistence:
@@ -149,10 +151,14 @@ hermes:
     WANTED_UID: "1000"
 
 postgresql:
-  extraLabels: {}
-  svcExtraLabels: {}
+  extraLabels: null
+  svcExtraLabels: null
   containerPortName: ""
   svcPortName: postgresql
+  # Live has only a livenessProbe, no readinessProbe.
+  probes:
+    readiness: false
+  volumeName: pg-data
   persistence:
     claimName: cindytech1-postgresql-pvc
     storageClassName: local-path
@@ -160,18 +166,21 @@ postgresql:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
+  # DB/USER are plain values here (not from a ConfigMap) — that's how this
+  # specific live instance is actually set, unlike hermes/eugenechen.
   env:
-    - name: POSTGRES_DB
-      valueFrom: {configMapKeyRef: {name: cindytech1-config, key: POSTGRES_DB}}
-    - name: POSTGRES_USER
-      valueFrom: {configMapKeyRef: {name: cindytech1-config, key: POSTGRES_USER}}
+    - {name: POSTGRES_DB, value: hermes}
+    - {name: POSTGRES_USER, value: hermes}
     - name: POSTGRES_PASSWORD
       valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: POSTGRES_PASSWORD}}
     - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
 
 redis:
-  extraLabels: {}
-  svcExtraLabels: {}
+  extraLabels: null
+  svcExtraLabels: null
+  # Live has only a livenessProbe, no readinessProbe.
+  probes:
+    readiness: false
   containerPortName: ""
   svcPortName: redis
   persistence:

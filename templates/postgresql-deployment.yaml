@@ -37,13 +37,15 @@ spec:
               protocol: TCP
           env:
             {{- toYaml $p.env | nindent 12 }}
-          {{- if $p.probes.enabled }}
+          {{- if and $p.probes.enabled $p.probes.readiness }}
           readinessProbe:
             exec:
               command: [pg_isready, -U, hermes, -d, hermes]
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 5
+          {{- end }}
+          {{- if and $p.probes.enabled $p.probes.liveness }}
           livenessProbe:
             exec:
               command: [pg_isready, -U, hermes, -d, hermes]
@@ -55,12 +57,12 @@ spec:
             {{- toYaml $p.resources | nindent 12 }}
           {{- if $p.persistence.enabled }}
           volumeMounts:
-            - name: postgres-data
+            - name: {{ $p.volumeName }}
               mountPath: /var/lib/postgresql/data
           {{- end }}
       {{- if $p.persistence.enabled }}
       volumes:
-        - name: postgres-data
+        - name: {{ $p.volumeName }}
           persistentVolumeClaim:
             claimName: {{ $p.persistence.claimName }}
       {{- end }}

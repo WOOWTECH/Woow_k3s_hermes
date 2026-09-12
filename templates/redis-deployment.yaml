@@ -50,13 +50,15 @@ spec:
             - name: redis-data
               mountPath: /data
           {{- end }}
-          {{- if $r.probes.enabled }}
+          {{- if and $r.probes.enabled $r.probes.readiness }}
           readinessProbe:
             exec:
               command: [redis-cli, ping]
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
+          {{- end }}
+          {{- if and $r.probes.enabled $r.probes.liveness }}
           livenessProbe:
             exec:
               command: [redis-cli, ping]

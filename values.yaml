@@ -237,10 +237,17 @@ postgresql:
   # Same, for the Service — deliberately never gets a component label.
   svcExtraLabels:
     app.kubernetes.io/part-of: hermes
-  # pg_isready readiness/liveness probes. Off on the one live instance that
-  # predates them.
+  # pg_isready readiness/liveness probes. `enabled` is the master switch;
+  # `readiness`/`liveness` let one be off while the other stays on
+  # (cindytech1 has liveness only). Both off on the one live instance that
+  # predates probes entirely (eugenechen-hermes).
   probes:
     enabled: true
+    readiness: true
+    liveness: true
+  # Mount name for the postgres data volume — "postgres-data" everywhere
+  # except cindytech1, which calls it "pg-data".
+  volumeName: postgres-data
   # Name given to the 5432 port. Empty = no name field. Only the "hermes"
   # instance names both; cindytech1 names only the Service port
   # ("postgresql"), and eugenechen-hermes names neither.
@@ -294,8 +301,12 @@ redis:
     enabled: true
     maxmemory: 256mb
     maxmemoryPolicy: allkeys-lru
+  # `enabled` is the master switch; `readiness`/`liveness` let one be off
+  # while the other stays on (cindytech1 has liveness only).
   probes:
     enabled: true
+    readiness: true
+    liveness: true
   # Name given to the 6379 port. Empty = no name field. "hermes" and
   # cindytech1 both name it "redis"; eugenechen-hermes names neither.
   containerPortName: redis
