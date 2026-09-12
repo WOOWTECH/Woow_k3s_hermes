@@ -1,10 +1,14 @@
-# Environment files with real values
-.env
-*.env
-!.env.example
+# Secret-bearing files. Every pattern is anchored with a leading "/" so it
+# can never swallow a chart template; the "/**/" form still matches at any
+# depth (an unanchored "secrets.yaml" pattern once silently dropped
+# templates/secrets.yaml from git in a sibling repo).
+/.env
+/**/.env
+/**/*.env
+!/.env.example
 
 # Kubernetes secrets with real values
-**/01-secrets.yaml
+/**/01-secrets.yaml
 
 # Development tooling
 .claude/

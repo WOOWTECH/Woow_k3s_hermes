@@ -517,9 +517,11 @@ diskCleanup:
 rbac:
   enabled: false
 
-# `helm test` smoke pod: TCP-reachability checks against this release's own
-# Services (and pg_isready/redis-cli ping when postgresql/redis are
-# enabled). Read-only.
+# `helm test` smoke pod: TCP-reachability checks (busybox `nc -z`) against
+# this release's own Services — the agent gateway and dashboard ports, plus
+# the Postgres / Redis / terminal Services when those components are
+# enabled. It only proves the Services resolve and the ports accept a TCP
+# connection; it does NOT authenticate, log in or run a query. Read-only.
 tests:
   enabled: true
   # Each reachability check is retried this many times. The pod lives only a

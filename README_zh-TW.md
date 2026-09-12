@@ -35,6 +35,7 @@
 - [系統元件](#系統元件)
 - [截圖展示](#截圖展示)
 - [部署方式](#部署方式)
+- [卸載](#卸載)
 - [自訂 Docker 映像](#自訂-docker-映像)
 - [多實例部署](#多實例部署)
 - [白標品牌](#白標品牌)
@@ -391,7 +392,7 @@ namespace。預設情況下 Secret **只會被引用、不會被這個 chart 產
 key 清單見 `examples/secrets.example.yaml`。
 
 ```bash
-# 1. 複製本倉庫（或使用 GitHub release 的 tarball）
+# 1. 取得 chart —— 先用 clone（不 clone 的 tarball 做法見這個區塊下方）
 git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
 cd Woow_k3s_hermes
 
@@ -425,6 +426,17 @@ kubectl -n hermes get pods -w
 helm test hermes -n hermes
 ```
 
+**或者不 clone，直接從 GitHub tarball 安裝。** 第 2、3 步完全不變（Secret 與 values
+override 跟 chart 從哪裡來無關），只有第 4 步不同：把 `.` 換成 tarball 網址：
+
+```bash
+helm install hermes \
+  https://github.com/WOOWTECH/Woow_k3s_hermes/archive/refs/heads/main.tar.gz \
+  -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
 若要接手既有、手動管理的實例而非全新安裝，見 `deploy/woow-k3s/` 底下的各實例 values
 檔，並在 `helm upgrade --install` 加上 `--take-ownership`——詳見下方
 [多實例部署](#多實例部署)。
@@ -436,6 +448,7 @@ helm test hermes -n hermes
 | 開關 | 預設 | 產出內容 |
 |------|------|----------|
 | `namespace.create` | `true` | `Namespace` 物件本身（若等於 `-n` 指定的 release namespace 則不輸出）。 |
+| `keepOnUninstall` | `true` | 在 PVC、chart 自己產生的 Secret 以及有輸出的 `Namespace` 上加 `helm.sh/resource-policy: keep`，讓 `helm uninstall` 永遠不會刪掉資料（見 [卸載](#卸載)）。 |
 | `secrets.create` | `false` | 從 values 產生 `<instance>-secrets` 與 `cf-secrets`（有 `required()` 把關）。預設關閉——Secret 是被引用而非由 chart 擁有。 |
 | `postgresql.enabled` | `true` | Postgres Deployment + Service + PVC。 |
 | `redis.enabled` | `true` | Redis Deployment + Service + PVC。 |
@@ -501,6 +514,50 @@ gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5.3-c
 | `DASHBOARD_PASSWORD` | 是 | Dashboard Basic-auth 密碼 |
 | `CLOUDFLARE_TUNNEL_TOKEN` | K3s 專用 | Cloudflare Tunnel Token |
 | `POSTGRES_PASSWORD` | 是 | PostgreSQL 密碼 |
+
+---
+
+## 卸載
+
+```bash
+helm uninstall hermes -n hermes
+```
+
+只會刪掉這個 release 擁有的無狀態物件：agent / PostgreSQL / Redis / terminal /
+cloudflared 的 Deployment、它們的 Service、ConfigMap、`<instance>-disk-cleanup`
+CronJob、NetworkPolicy、Ingress，以及 terminal 的 ServiceAccount / Role /
+RoleBinding。
+
+**資料會保留。** `keepOnUninstall: true`（預設）會在所有存放狀態的物件上加上
+`helm.sh/resource-policy: keep`，Helm 就不會刪除它們：
+
+- 三個 PVC —— `<instance>-data`（agent）、`<instance>-postgresql-pvc`、
+  `<instance>-redis-pvc`；
+- 由 chart 自己產生的 Secret（只有 `secrets.create: true` 時才有：
+  `<instance>-secrets`、`cf-secrets`）。預設 `secrets.create: false` 時
+  Secret 根本不屬於這個 release，卸載本來就動不到；
+- chart 有輸出的 `Namespace`。等於 `-n` 的 namespace 永遠不會被輸出，所以
+  release namespace 不可能被卸載刪掉。
+
+正式環境依賴這個行為之前，先自己確認一次：
+
+```bash
+kubectl -n hermes get pvc \
+  -o custom-columns='NAME:.metadata.name,KEEP:.metadata.annotations.helm\.sh/resource-policy'
+```
+
+用同一個 `instance` 重新安裝就會接回同一組 PVC，agent 工作區、資料庫與 Redis AOF
+都跟卸載前一樣。
+
+要連資料一起刪，必須自己明確執行 —— 這個 chart 不會幫你刪：
+
+```bash
+kubectl -n hermes delete pvc hermes-data hermes-postgresql-pvc hermes-redis-pvc
+# Longhorn 的 "longhorn" 類別是 Retain：PV 會留在 Released 狀態，要另外刪。
+```
+
+`keepOnUninstall: false` 會把 keep annotation 全部拿掉。只有想讓整個測試 release
+徹底消失時才這樣用。
 
 ---
 

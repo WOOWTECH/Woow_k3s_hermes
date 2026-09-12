@@ -38,6 +38,7 @@
 - [Browser Terminal (ttyd)](#browser-terminal-ttyd)
 - [Screenshots](#screenshots)
 - [Deployment](#deployment)
+- [Uninstall](#uninstall)
 - [Custom Docker Image](#custom-docker-image)
 - [Multi-Instance Deployment](#multi-instance-deployment)
 - [White-Label Branding](#white-label-branding)
@@ -422,7 +423,7 @@ them yourself first (see `examples/secrets.example.yaml`), the same way you
 would for any other credential.
 
 ```bash
-# 1. Clone this repo (or use the GitHub release tarball)
+# 1. Get the chart — clone the repo (the tarball alternative is below the block)
 git clone https://github.com/WOOWTECH/Woow_k3s_hermes.git
 cd Woow_k3s_hermes
 
@@ -458,6 +459,19 @@ kubectl -n hermes get pods -w
 helm test hermes -n hermes
 ```
 
+**... or install straight from the GitHub tarball, no clone needed.** Steps 2
+and 3 are unchanged (the Secrets and the values override do not depend on
+where the chart comes from); only step 4 differs — pass the tarball URL
+instead of `.`:
+
+```bash
+helm install hermes \
+  https://github.com/WOOWTECH/Woow_k3s_hermes/archive/refs/heads/main.tar.gz \
+  -n hermes -f my-values.yaml \
+  --set-string placeholders.DOMAIN=hermes.example.com \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
 To take over an **existing** hand-managed instance instead of creating a new
 one, see the per-instance files under `deploy/woow-k3s/` and pass
 `--take-ownership` to `helm upgrade --install` — see
@@ -471,6 +485,7 @@ dev clusters or turn everything on for a full production install.
 | Toggle | Default | What it renders |
 |--------|---------|-----------------|
 | `namespace.create` | `true` | The `Namespace` object (skipped if it equals `-n`). |
+| `keepOnUninstall` | `true` | Adds `helm.sh/resource-policy: keep` to the PVCs, the chart-created Secrets and a rendered `Namespace`, so `helm uninstall` never deletes data (see [Uninstall](#uninstall)). |
 | `secrets.create` | `false` | Renders `<instance>-secrets` + `cf-secrets` from values (guarded by `required()`). Off by default — Secrets are referenced, not owned by the chart. |
 | `postgresql.enabled` | `true` | Postgres Deployment + Service + PVC. |
 | `redis.enabled` | `true` | Redis Deployment + Service + PVC. |
@@ -536,6 +551,53 @@ gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5.3-c
 | `DASHBOARD_PASSWORD` | Yes | Dashboard Basic-auth password |
 | `CLOUDFLARE_TUNNEL_TOKEN` | K3s only | Cloudflare Tunnel token |
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
+
+---
+
+## Uninstall
+
+```bash
+helm uninstall hermes -n hermes
+```
+
+That removes only the stateless objects this release owns: the agent /
+PostgreSQL / Redis / terminal / cloudflared Deployments, their Services, the
+ConfigMaps, the `<instance>-disk-cleanup` CronJob, the NetworkPolicies, the
+Ingress and the terminal's ServiceAccount / Role / RoleBinding.
+
+**Data is kept.** With `keepOnUninstall: true` (the default) the chart stamps
+`helm.sh/resource-policy: keep` on everything that holds state, and Helm then
+refuses to delete it:
+
+- the three PVCs — `<instance>-data` (agent), `<instance>-postgresql-pvc`,
+  `<instance>-redis-pvc`;
+- every Secret the chart created itself (only with `secrets.create: true`:
+  `<instance>-secrets`, `cf-secrets`). With the default
+  `secrets.create: false` the Secrets are not part of the release at all, so
+  an uninstall cannot touch them either way;
+- a `Namespace` the chart rendered. A namespace equal to `-n` is never
+  rendered, so the release namespace can never be deleted by an uninstall.
+
+Check it on a live release before you rely on it:
+
+```bash
+kubectl -n hermes get pvc \
+  -o custom-columns='NAME:.metadata.name,KEEP:.metadata.annotations.helm\.sh/resource-policy'
+```
+
+Re-installing with the same `instance` re-attaches those PVCs, so the agent
+workspace, the database and the Redis AOF come back as they were.
+
+To delete the data too, do it explicitly — nothing in this chart will do it
+for you:
+
+```bash
+kubectl -n hermes delete pvc hermes-data hermes-postgresql-pvc hermes-redis-pvc
+# Longhorn's "longhorn" class is Retain: the PVs stay Released until you delete them as well.
+```
+
+`keepOnUninstall: false` drops the annotation everywhere. Only do that for a
+throwaway test release you want to disappear completely.
 
 ---
 

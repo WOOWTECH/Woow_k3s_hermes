@@ -1,7 +1,8 @@
 {{- /*
-Read-only `helm test` smoke pod: proves this release's own Services are
-reachable and, when enabled, that Postgres/Redis actually answer. Never
-writes anything.
+Read-only `helm test` smoke pod: proves this release's own Services resolve
+and that every enabled component's port accepts a TCP connection (busybox
+`nc -z`). It does NOT authenticate or issue a query — it is a reachability
+check, not a pg_isready/redis-cli health check. Never writes anything.
 */ -}}
 {{- if .Values.tests.enabled }}
 {{- $instance := include "hermes.instance" . }}
