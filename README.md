@@ -483,6 +483,7 @@ dev clusters or turn everything on for a full production install.
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | Only rendered when `hermes.service.type: NodePort`. |
 | `tests.enabled` | `true` | The `helm test` smoke pod (TCP checks against this release's own Services). |
 | `networkPolicy.allowTests` | `true` | Lets the `helm test` smoke pod through to Postgres/Redis. Without it the NetworkPolicy blocks the test and `helm test` can never pass. Set `false` on an instance whose live NetworkPolicy must stay byte-identical through a takeover. |
+| `hermes.podAnnotations` / `postgresql.` / `redis.` / `cloudflared.` / `terminal.` | `{}` | Extra `spec.template.metadata.annotations`. Exists to **reproduce** what is already live: a past `kubectl rollout restart` leaves a `kubectl.kubernetes.io/restartedAt` stamp there, and because that stamp is part of the pod-template hash, dropping it on takeover would roll the Deployment. |
 | `placeholdersStrict` | `true` | Fail the render if any `__NAME__` placeholder is left unsubstituted (see [Placeholders](#placeholders-credentials-that-live-inside-a-pod-template)). |
 
 ### Preview / diff before applying
@@ -611,6 +612,12 @@ helm upgrade --install hermes . -n hermes \
 Rendering a `deploy/woow-k3s/*.yaml` file reproduces its live object graph
 field-for-field (verify with `scripts/check-drift.sh`), so `--take-ownership`
 adopts the existing objects without restarting anything.
+
+That includes anything a past `kubectl rollout restart` left behind: the
+stamp it writes to `spec.template.metadata.annotations` is part of the
+pod-template hash, so an instance file has to replay it verbatim
+(`<component>.podAnnotations`) or the takeover rolls that Deployment. Three
+of the live Deployments carry such a stamp and their instance files set it.
 
 ### Placeholders: credentials that live inside a pod template
 

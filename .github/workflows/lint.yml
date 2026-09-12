@@ -103,6 +103,44 @@ jobs:
             echo "$f: every object in -n"
           done
 
+      - name: Pod-template annotations are replayed
+        run: |
+          # A live `kubectl.kubernetes.io/restartedAt` stamp is part of the
+          # pod-template hash: if an instance file declares podAnnotations and
+          # the render drops them, a takeover rolls that Deployment.
+          pip install --quiet pyyaml
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          bad = []
+          RENDER = {"deploy/woow-k3s/hermes-hermes.yaml": "/tmp/r/hermes-instance.yaml",
+                    "deploy/woow-k3s/eugenechen-hermes-hermes.yaml": "/tmp/r/eugenechen-instance.yaml",
+                    "deploy/woow-k3s/cindytech-cindytech1.yaml": "/tmp/r/cindytech1-instance.yaml"}
+          COMPONENT = {"hermes": lambda i: i, "postgresql": lambda i: f"{i}-postgresql",
+                       "redis": lambda i: f"{i}-redis", "cloudflared": lambda i: "cloudflared",
+                       "terminal": lambda i: f"{i}-terminal"}
+          total = 0
+          for vf, rf in RENDER.items():
+              v = yaml.safe_load(open(vf)) or {}
+              inst = v["instance"]
+              deps = {d["metadata"]["name"]: d for d in yaml.safe_load_all(open(rf))
+                      if d and d["kind"] == "Deployment"}
+              for comp, namer in COMPONENT.items():
+                  want = ((v.get(comp) or {}).get("podAnnotations")) or {}
+                  if not want:
+                      continue
+                  total += len(want)
+                  d = deps.get(namer(inst))
+                  if not d:
+                      bad.append(f"{vf}: {comp}.podAnnotations set but {namer(inst)} not rendered"); continue
+                  got = (d["spec"]["template"]["metadata"].get("annotations") or {})
+                  for k, x in want.items():
+                      if got.get(k) != x:
+                          bad.append(f"{vf}: {namer(inst)} pod template lost {k} (got {got.get(k)!r})")
+          if not total:
+              bad.append("no instance declares podAnnotations — the live restartedAt stamps are no longer replayed")
+          sys.exit("\n".join(bad)) if bad else print(f"{total} pod-template annotation(s) replayed")
+          EOF
+
       - name: Placeholder guard fires
         run: |
           # placeholdersStrict must refuse to ship a literal __NAME__ as

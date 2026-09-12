@@ -448,6 +448,7 @@ helm test hermes -n hermes
 | `hermes.service.nodePort` / `dashboardNodePort` | `null` | 只在 `hermes.service.type: NodePort` 時才輸出。 |
 | `tests.enabled` | `true` | `helm test` 煙霧測試 Pod（對本 release 自己的 Service 做 TCP 檢查）。 |
 | `networkPolicy.allowTests` | `true` | 放行 `helm test` 煙霧測試 Pod 連到 Postgres/Redis。不開的話 NetworkPolicy 會擋住測試，`helm test` 永遠不會通過。若某個實例的正式 NetworkPolicy 必須在接手時保持逐位元組相同，就設為 `false`。 |
+| `hermes.podAnnotations` / `postgresql.` / `redis.` / `cloudflared.` / `terminal.` | `{}` | 額外的 `spec.template.metadata.annotations`。它存在的目的是**重現**線上已有的東西：過去執行過 `kubectl rollout restart` 會在這裡留下 `kubectl.kubernetes.io/restartedAt` 戳記，而這個戳記算在 pod-template hash 裡，接手時漏掉它就會讓該 Deployment 整批重啟。 |
 | `placeholdersStrict` | `true` | 任何 `__NAME__` 佔位字沒被取代時直接讓 render 失敗（見 [Placeholders](#placeholders寫死在-pod-template-裡的憑證)）。 |
 
 ### 套用前預覽 / diff
@@ -579,6 +580,11 @@ helm upgrade --install hermes . -n hermes \
 套用 `deploy/woow-k3s/*.yaml` 會逐欄位重現正式環境現有的物件圖（可用
 `scripts/check-drift.sh` 驗證），所以 `--take-ownership` 只是接手既有物件，
 不會讓任何東西重新啟動。
+
+這也包含過去 `kubectl rollout restart` 留下的痕跡：它寫進
+`spec.template.metadata.annotations` 的戳記算在 pod-template hash 裡，所以
+實例檔必須原樣複寫（`<元件>.podAnnotations`），否則接手時那個 Deployment 會
+整批重啟。線上有三個 Deployment 帶著這種戳記，它們的實例檔都已設定。
 
 ### Placeholders：寫死在 pod template 裡的憑證
 

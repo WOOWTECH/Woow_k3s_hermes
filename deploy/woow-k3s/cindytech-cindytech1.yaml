@@ -21,6 +21,10 @@ secrets:
   create: false
 
 hermes:
+  # Replay of the live pod-template annotation left by a past `kubectl
+  # rollout restart`; part of the pod-template hash.
+  podAnnotations:
+    kubectl.kubernetes.io/restartedAt: "2026-06-18T13:30:34+08:00"
   # Live name, not the chart default (<instance>-agent-sa): renaming the
   # ServiceAccount would change the pod template and restart the agent.
   serviceAccountName: hermes-agent-sa

@@ -22,6 +22,7 @@ spec:
       app: {{ $instance }}-postgresql
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $p.podAnnotations | nindent 6 }}
       labels:
         app: {{ $instance }}-postgresql
     spec:

@@ -87,6 +87,12 @@ secrets:
   extraEnv: {}
 
 hermes:
+  # Extra `spec.template.metadata.annotations` on the pod template. Part of
+  # the pod-template hash, so this exists purely to REPRODUCE what is already
+  # live: a past `kubectl rollout restart` stamps
+  # `kubectl.kubernetes.io/restartedAt` here, and dropping it on takeover
+  # would roll the Deployment. Never add a new one to a live instance.
+  podAnnotations: {}
   image:
     repository: nousresearch/hermes-agent
     tag: latest
@@ -256,6 +262,12 @@ hermes:
 
 postgresql:
   enabled: true
+  # Extra `spec.template.metadata.annotations` on the pod template. Part of
+  # the pod-template hash, so this exists purely to REPRODUCE what is already
+  # live: a past `kubectl rollout restart` stamps
+  # `kubectl.kubernetes.io/restartedAt` here, and dropping it on takeover
+  # would roll the Deployment. Never add a new one to a live instance.
+  podAnnotations: {}
   image:
     repository: postgres
     tag: "15"
@@ -324,6 +336,12 @@ postgresql:
 
 redis:
   enabled: true
+  # Extra `spec.template.metadata.annotations` on the pod template. Part of
+  # the pod-template hash, so this exists purely to REPRODUCE what is already
+  # live: a past `kubectl rollout restart` stamps
+  # `kubectl.kubernetes.io/restartedAt` here, and dropping it on takeover
+  # would roll the Deployment. Never add a new one to a live instance.
+  podAnnotations: {}
   image:
     repository: redis
     tag: "7-alpine"
@@ -390,6 +408,12 @@ cloudflared:
   strategy:
     type: Recreate
   args: [tunnel, run]
+  # Extra `spec.template.metadata.annotations` on the pod template. Part of
+  # the pod-template hash, so this exists purely to REPRODUCE what is already
+  # live: a past `kubectl rollout restart` stamps
+  # `kubectl.kubernetes.io/restartedAt` here, and dropping it on takeover
+  # would roll the Deployment. Never add a new one to a live instance.
+  podAnnotations: {}
   # Non-empty = pass the tunnel token as a literal `--token` CLI arg instead
   # of TUNNEL_TOKEN from cf-secrets (matches how one legacy live instance is
   # actually configured). NEVER set a real token here in a committed values
@@ -443,6 +467,12 @@ networkPolicy:
 # the "hermes" instance in namespace "hermes" runs this live.
 terminal:
   enabled: true
+  # Extra `spec.template.metadata.annotations` on the pod template. Part of
+  # the pod-template hash, so this exists purely to REPRODUCE what is already
+  # live: a past `kubectl rollout restart` stamps
+  # `kubectl.kubernetes.io/restartedAt` here, and dropping it on takeover
+  # would roll the Deployment. Never add a new one to a live instance.
+  podAnnotations: {}
   image:
     repository: ubuntu
     tag: "24.04"

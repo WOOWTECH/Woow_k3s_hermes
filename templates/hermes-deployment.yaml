@@ -21,6 +21,7 @@ spec:
       app: {{ $instance }}
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $h.podAnnotations | nindent 6 }}
       labels:
         app: {{ $instance }}
     spec:

@@ -26,6 +26,7 @@ spec:
       app: cloudflared
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $c.podAnnotations | nindent 6 }}
       labels:
         app: cloudflared
     spec:

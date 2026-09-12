@@ -29,6 +29,10 @@ secrets:
 
 hermes:
   replicaCount: 0 # MUST STAY 0 — this instance is intentionally disabled.
+  # Replay of the live pod-template annotation left by a past `kubectl
+  # rollout restart`; part of the pod-template hash.
+  podAnnotations:
+    kubectl.kubernetes.io/restartedAt: "2026-06-27T00:10:00+08:00"
   # No labels anywhere on this instance: neither the Deployments nor the
   # Services carry any (it predates the labelling convention).
   renderLabels: false

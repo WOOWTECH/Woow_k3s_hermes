@@ -90,6 +90,7 @@ spec:
       app: {{ $instance }}-terminal
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $t.podAnnotations | nindent 6 }}
       labels:
         app: {{ $instance }}-terminal
     spec:

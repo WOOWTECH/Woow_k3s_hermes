@@ -22,6 +22,7 @@ spec:
       app: {{ $instance }}-redis
   template:
     metadata:
+      {{- include "hermes.podAnnotations" $r.podAnnotations | nindent 6 }}
       labels:
         app: {{ $instance }}-redis
     spec:

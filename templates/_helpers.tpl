@@ -89,3 +89,19 @@ someone's password — which, on a takeover, would also restart the pod.
               app.kubernetes.io/instance: {{ include "hermes.instance" . }}
 {{- end }}
 {{- end -}}
+
+{{- /*
+Pod-template annotations.
+
+Anything under `spec.template.metadata.annotations` is part of the
+pod-template hash, so a live annotation that the chart cannot reproduce
+makes a takeover roll the Deployment. Three live Deployments carry a
+`kubectl.kubernetes.io/restartedAt` stamp left by a past `kubectl rollout
+restart`; the instance values replay it verbatim so the hash is unchanged.
+*/ -}}
+{{- define "hermes.podAnnotations" -}}
+{{- with . }}
+annotations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}

@@ -90,5 +90,12 @@ networkPolicy:
   # tracked as a follow-up together with agentSelectorLabel above).
   allowTests: false
 
-# Everything else (cloudflared, terminal, diskCleanup, ingress, rbac) is
-# left at chart defaults, which already reproduce this instance.
+# Everything else (terminal, diskCleanup, ingress, rbac) is left at chart
+# defaults, which already reproduce this instance.
+
+cloudflared:
+  # Replay of the live pod-template annotation left by a past `kubectl
+  # rollout restart`. It is part of the pod-template hash, so dropping it on
+  # takeover would roll the tunnel pod.
+  podAnnotations:
+    kubectl.kubernetes.io/restartedAt: "2026-07-23T20:37:16+08:00"
