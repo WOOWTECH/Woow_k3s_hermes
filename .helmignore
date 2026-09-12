@@ -15,15 +15,18 @@
 *.tmproj
 .vscode/
 
-# Repository content that isn't part of the chart itself
-deploy/
-docker/
-docs/
-patches/
-tests/
-skills/
-config/
-scripts/
+# Repository content that isn't part of the chart itself. Anchored with a
+# leading "/" so these only match the repo-root copies, never anything
+# under templates/ (an unanchored "tests/" here once silently dropped
+# templates/tests/smoke.yaml — the helm-test hook pod — from the chart).
+/deploy/
+/docker/
+/docs/
+/patches/
+/tests/
+/skills/
+/config/
+/scripts/
 CHANGELOG.md
 CONTRIBUTING.md
 README.md
