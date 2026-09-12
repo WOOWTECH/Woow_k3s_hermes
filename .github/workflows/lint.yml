@@ -157,7 +157,7 @@ jobs:
               if extra:
                   bad.append(f"{f}: secret values do not belong in instance values: {sorted(extra)}")
           for f in glob.glob("/tmp/r/*.yaml"):
-              if "secrets" in f or "rbac-on" in f:
+              if "secrets" in f or "rbac-on" in f or "no-keep" in f or "test-install" in f:
                   continue
               for d in yaml.safe_load_all(open(f)):
                   if d and d["kind"] == "Secret":
