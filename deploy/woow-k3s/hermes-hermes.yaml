@@ -11,8 +11,6 @@
 
 instance: hermes
 
-namespace:
-  name: hermes
 
 cloudflare:
   domain: woowtech-hermes.woowtech.io

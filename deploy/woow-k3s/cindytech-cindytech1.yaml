@@ -10,8 +10,6 @@
 
 instance: cindytech1
 
-namespace:
-  name: cindytech
 
 secrets:
   create: false

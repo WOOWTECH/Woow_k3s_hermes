@@ -20,8 +20,6 @@
 
 instance: hermes
 
-namespace:
-  name: eugenechen-hermes
 
 secrets:
   create: false

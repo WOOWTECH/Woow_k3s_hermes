@@ -25,7 +25,9 @@ namespace:
   # uninstall` can never delete the namespace the release lives in — create
   # it with `--create-namespace` instead.
   create: true
-  name: hermes
+  # EMPTY = follow `-n`/`--namespace`. Never hardcode a real instance
+  # namespace here or in deploy/woow-k3s/*.yaml (see hermes.ns in _helpers.tpl).
+  name: ""
 
 # Add `helm.sh/resource-policy: keep` to Namespaces, PVCs and chart-created
 # Secrets, so `helm uninstall` never deletes data.
