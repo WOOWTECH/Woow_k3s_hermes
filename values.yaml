@@ -84,6 +84,7 @@ hermes:
   # predates labels entirely and has none at all; set this false to match
   # it exactly.
   renderLabels: true
+  svcRenderLabels: true
   # Extra labels merged in alongside `app: <instance>` on the Deployment
   # only, when renderLabels is true. The "hermes" instance in namespace
   # "hermes" is the only live instance carrying these; others (when
@@ -228,6 +229,7 @@ postgresql:
   # One live instance (eugenechen-hermes, ephemeral/no-persistence) has no
   # labels at all on this Deployment/Service; set this false to match it.
   renderLabels: true
+  svcRenderLabels: true
   # Merged in alongside `app: <instance>-postgresql` on the Deployment when
   # renderLabels is true. The "hermes" instance adds component: database on
   # top of this (see deploy/woow-k3s/hermes-hermes.yaml); cindytech1
@@ -290,6 +292,7 @@ redis:
   strategy:
     type: Recreate
   renderLabels: true
+  svcRenderLabels: true
   extraLabels:
     app.kubernetes.io/part-of: hermes
   svcExtraLabels:

@@ -80,7 +80,7 @@ kind: Service
 metadata:
   name: {{ $instance }}-redis-svc
   namespace: {{ include "hermes.ns" . }}
-  {{- if $r.renderLabels }}
+  {{- if $r.svcRenderLabels }}
   labels:
     app: {{ $instance }}-redis
     {{- with $r.svcExtraLabels }}

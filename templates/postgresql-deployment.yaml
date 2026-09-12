@@ -72,7 +72,7 @@ kind: Service
 metadata:
   name: {{ $instance }}-postgresql-svc
   namespace: {{ include "hermes.ns" . }}
-  {{- if $p.renderLabels }}
+  {{- if $p.svcRenderLabels }}
   labels:
     app: {{ $instance }}-postgresql
     {{- with $p.svcExtraLabels }}

@@ -100,7 +100,7 @@ kind: Service
 metadata:
   name: {{ $instance }}-agent-svc
   namespace: {{ include "hermes.ns" . }}
-  {{- if $h.renderLabels }}
+  {{- if $h.svcRenderLabels }}
   labels:
     app: {{ $instance }}
     {{- with $h.svcExtraLabels }}

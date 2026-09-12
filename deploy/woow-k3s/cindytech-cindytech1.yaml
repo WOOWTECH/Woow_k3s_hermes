@@ -25,6 +25,7 @@ hermes:
   # (component/part-of) in place; null is required to actually clear them.
   extraLabels: null
   svcExtraLabels: null
+  svcRenderLabels: false
   imagePullSecrets:
     - name: jfrog-registry
   persistence:
@@ -153,6 +154,7 @@ hermes:
 postgresql:
   extraLabels: null
   svcExtraLabels: null
+  svcRenderLabels: false
   containerPortName: ""
   svcPortName: postgresql
   # Live has only a livenessProbe, no readinessProbe.
@@ -178,6 +180,7 @@ postgresql:
 redis:
   extraLabels: null
   svcExtraLabels: null
+  svcRenderLabels: false
   # Live has only a livenessProbe, no readinessProbe.
   probes:
     readiness: false
