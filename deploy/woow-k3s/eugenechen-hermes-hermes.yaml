@@ -64,6 +64,7 @@ hermes:
     enabled: true
     username: admin
     password: ""
+  extraEnvTail: []
   lifecyclePostStart: >-
     sed -i '/^  - hermes-cli$/d' /opt/data/config.yaml 2>/dev/null;
     rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null;

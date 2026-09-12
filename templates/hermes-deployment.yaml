@@ -51,6 +51,9 @@ spec:
         - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
           value: {{ $h.dashboardAuth.password | quote }}
         {{- end }}
+        {{- with $h.extraEnvTail }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- if $h.lifecyclePostStart }}
         lifecycle:
           postStart:

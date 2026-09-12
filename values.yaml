@@ -157,7 +157,6 @@ hermes:
     - {name: PATH, value: "/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/google-cloud-sdk/bin"}
     - {name: HERMES_DASHBOARD_TUI, value: "1"}
     - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
-    - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
   # Shell script run as the container's postStart lifecycle hook. Empty
   # string omits the lifecycle block entirely.
   lifecyclePostStart: >-
@@ -187,6 +186,12 @@ hermes:
     enabled: true
     username: admin
     password: ""
+  # Extra raw env entries appended AFTER dashboardAuth (order matters for
+  # the pod-template hash, so this can't just live in the `env` list
+  # above). Only the "hermes" instance has this one variable, and only at
+  # the very end, after the dashboard-auth pair.
+  extraEnvTail:
+    - {name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, value: "true"}
   # Extra sidecar containers, appended verbatim (rendered with `toYaml`) —
   # e.g. the legacy hermes-webui sidecar still running on two older
   # instances. Empty on new/current-generation instances.

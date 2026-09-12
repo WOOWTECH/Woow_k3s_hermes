@@ -51,6 +51,7 @@ hermes:
     - {name: HERMES_TUI_DIR, value: /opt/data/ui-tui}
   dashboardAuth:
     enabled: false
+  extraEnvTail: []
   lifecyclePostStart: "rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null || true"
   # Legacy hermes-webui sidecar, same era as eugenechen-hermes but with its
   # own icon-replacement postStart hook and full volume mounts.
