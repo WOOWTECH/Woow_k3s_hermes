@@ -21,12 +21,14 @@ secrets:
   create: false
 
 hermes:
-  # The Cloudflare tunnel routes cindytech1-hermes.woowtech.io to <instance>-webui-svc:8787.
-  # Without this Service that hostname returns 502 even though the webui
-  # sidecar is healthy (proved with an in-cluster call to localhost:8787).
-  # Merges with the chart's service defaults; gateway/dashboard ports unchanged.
-  service:
-    webuiPort: 8787
+  # service.webuiPort is deliberately NOT set (so no <instance>-webui-svc is
+  # rendered). It was set to 8787 for a few hours on 2026-09-13 to stop
+  # cindytech1-hermes.woowtech.io returning 502, and the owner then retired that
+  # hostname as unused - so the Service exposing the webui has no consumer and
+  # was removed again. The hermes-webui sidecar itself is still in the pod and
+  # still healthy; it is simply not reachable from outside, which is the intent.
+  # Only set webuiPort here if that hostname (or another route to port 8787)
+  # comes back.
 
   # Replay of the live pod-template annotation left by a past `kubectl
   # rollout restart`; part of the pod-template hash.

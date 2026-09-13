@@ -152,10 +152,18 @@ hermes:
     gatewayPort: 8642
     dashboardPort: 9119
     # Port for a Service in front of the webui sidecar (container port 8787).
-    # null = no webui Service is rendered, which is the historical behaviour.
-    # Set it for any instance whose Cloudflare tunnel routes a hostname to
-    # "<instance>-webui-svc:8787" — without the Service that hostname 502s even
-    # though the webui container itself is healthy.
+    # null = no webui Service is rendered. That is both the historical behaviour
+    # and, as of 2026-09-13, what EVERY instance uses: the two hostnames this
+    # knob existed for are both retired.
+    #   * woowtech-hermes.woowtech.io could never work from inside the cluster
+    #     anyway - that instance runs the agent container ONLY, with nothing
+    #     listening on 8787, so the Service had an endpoint that could not serve.
+    #   * cindytech1-hermes.woowtech.io WAS fixed by setting this to 8787, and the
+    #     owner then retired the hostname as unused, so it was unset again.
+    # The knob stays because cindytech1 does still run a healthy webui sidecar, so
+    # a future route to port 8787 needs only this one value. Set it ONLY for an
+    # instance that actually has the sidecar, and only when a route exists -
+    # otherwise it creates a Service that nothing can reach and nothing uses.
     webuiPort: null
     # Only rendered when service.type=NodePort.
     nodePort: null
