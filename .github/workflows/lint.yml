@@ -62,6 +62,20 @@ jobs:
             --set "$SECRETS" --set-string "$PH"                                 > /tmp/r/test-install.yaml
           # rbac.enabled is opt-in everywhere; prove it still renders cleanly.
           helm template hermes . -n hermes --set instance=hermes --set rbac.enabled=true --set-string "$PH" > /tmp/r/rbac-on.yaml
+          # hermes.service.webuiPort is null for every instance (both hostnames it
+          # existed for are retired), so nothing else here exercises it. Render it
+          # explicitly so the Service template cannot rot unnoticed, and assert it
+          # appears ONLY when the value is set.
+          helm template hermes . -n hermes --set instance=hermes --set hermes.service.webuiPort=8787 \
+            --set-string "$PH"                                                    > /tmp/r/webui-svc.yaml
+          grep -q '^  name: hermes-webui-svc$' /tmp/r/webui-svc.yaml || {
+            echo "::error::hermes.service.webuiPort=8787 no longer renders hermes-webui-svc"; exit 1; }
+          for f in /tmp/r/*-instance.yaml; do
+            if grep -q 'webui-svc' "$f"; then
+              echo "::error::$f renders a webui Service, but no instance should have"
+              echo "::error::one - both hostnames it existed for are retired"; exit 1
+            fi
+          done
           wc -l /tmp/r/*.yaml
 
       - name: Every template is tracked and renders
