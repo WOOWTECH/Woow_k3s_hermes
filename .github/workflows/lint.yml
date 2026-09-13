@@ -91,7 +91,11 @@ jobs:
           print(out.stdout, out.stderr)
           assert out.returncode == 0, "helm package failed"
           import tarfile, glob
-          tf = tarfile.open("/tmp/hermes-2.0.0.tgz")
+          # Never hardcode the version here: it silently breaks this check on
+          # every Chart.yaml version bump (it did, on 2.0.0 -> 2.0.1).
+          tgz = glob.glob("/tmp/hermes-*.tgz")
+          assert len(tgz) == 1, f"expected exactly one packaged chart, got {tgz}"
+          tf = tarfile.open(tgz[0])
           names = {n.split("/", 1)[1] for n in tf.getnames() if "/" in n}
           for f in glob.glob("templates/**/*.yaml", recursive=True):
               assert f in names, f"{f} missing from packaged chart (likely .helmignore-excluded)"
