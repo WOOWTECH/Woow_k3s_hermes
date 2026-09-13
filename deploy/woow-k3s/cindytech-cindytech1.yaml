@@ -23,12 +23,11 @@ secrets:
 hermes:
   # service.webuiPort is deliberately NOT set (so no <instance>-webui-svc is
   # rendered). It was set to 8787 for a few hours on 2026-09-13 to stop
-  # cindytech1-hermes.woowtech.io returning 502, and the owner then retired that
-  # hostname as unused - so the Service exposing the webui has no consumer and
-  # was removed again. The hermes-webui sidecar itself is still in the pod and
-  # still healthy; it is simply not reachable from outside, which is the intent.
-  # Only set webuiPort here if that hostname (or another route to port 8787)
-  # comes back.
+  # cindytech1-hermes.woowtech.io returning 502; the owner then retired that
+  # hostname as unused, so the Service was removed again and, shortly after, the
+  # webui sidecar it fronted was removed too (see extraContainers below).
+  # Setting webuiPort alone would now render a Service with no container behind
+  # it - restore the sidecar as well if that hostname ever comes back.
 
   # Replay of the live pod-template annotation left by a past `kubectl
   # rollout restart`; part of the pod-template hash.
@@ -75,76 +74,30 @@ hermes:
   lifecyclePostStart: "rm -f /usr/local/bin/argocd /usr/local/bin/helm /usr/bin/docker 2>/dev/null || true"
   # Legacy hermes-webui sidecar, same era as eugenechen-hermes but with its
   # own icon-replacement postStart hook and full volume mounts.
-  extraContainers:
-    - name: hermes-webui
-      image: ghcr.io/nesquena/hermes-webui:latest
-      imagePullPolicy: Always
-      tty: true
-      command: ["sh", "-c"]
-      args:
-        - |
-          mkdir -p /home/hermeswebui/.hermes
-          echo "MINIMAX_API_KEY=${MINIMAX_API_KEY}" > /home/hermeswebui/.hermes/.env
-          chmod 644 /home/hermeswebui/.hermes/.env
-          for i in $(seq 1 90); do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8642/ 2>/dev/null)
-            [ "$HTTP" = "200" ] || [ "$HTTP" = "404" ] && break
-            sleep 2
-          done
-          (while true; do
-            NOW=$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")
-            printf '{"gateway_state":"running","updated_at":"%s","pid":1,"platform":"hermes-agent","version":"0.13.0"}\n' "$NOW" > /home/hermeswebui/.hermes/gateway_state.json 2>/dev/null
-            sleep 25
-          done) &
-          rm -f /home/hermeswebui/.hermes/.skills_prompt_snapshot.json 2>/dev/null
-          if [ -f /hermeswebui_init.bash ]; then
-            sed -i 's/chmod 700 "$itdir"/chmod 755 "$itdir"/' /hermeswebui_init.bash 2>/dev/null
-            sed -i '/cd \/app; python server.py/i test -f /home/hermeswebui/.hermes/replace_icons.sh && sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true' /hermeswebui_init.bash 2>/dev/null
-            exec /hermeswebui_init.bash
-          else
-            echo "WebUI init script not found, sleeping..."
-            sleep infinity
-          fi
-      lifecycle:
-        postStart:
-          exec:
-            command: ["sh", "-c", "sh /home/hermeswebui/.hermes/replace_icons.sh 2>/dev/null || true"]
-      env:
-        - {name: HERMES_WEBUI_CHAT_BACKEND, value: gateway}
-        - name: HERMES_WEBUI_GATEWAY_API_KEY
-          valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: API_SERVER_KEY}}
-        - name: MINIMAX_API_KEY
-          valueFrom: {secretKeyRef: {name: cindytech1-secrets, key: MINIMAX_API_KEY}}
-        - {name: PLAYWRIGHT_BROWSERS_PATH, value: /opt/data/playwright-browsers}
-        - {name: LD_LIBRARY_PATH, value: /opt/shared-tools/lib}
-        - {name: PATH, value: "/opt/shared-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        - {name: HERMES_WEBUI_HOST, value: "0.0.0.0"}
-        - {name: HERMES_WEBUI_PORT, value: "8787"}
-        - {name: HERMES_WEBUI_STATE_DIR, value: /home/hermeswebui/.hermes/webui}
-        - {name: HERMES_HOME, value: /home/hermeswebui/.hermes}
-        - {name: WANTED_UID, value: "1000"}
-        - {name: WANTED_GID, value: "1000"}
-        - {name: GATEWAY_HEALTH_URL, value: http://localhost:8642}
-        - {name: HERMES_WEBUI_PASSWORD, value: __WEBUI_PASSWORD__}
-      ports:
-        - {containerPort: 8787, name: http, protocol: TCP}
-      readinessProbe:
-        tcpSocket: {port: 8787}
-        initialDelaySeconds: 30
-        periodSeconds: 10
-        failureThreshold: 12
-      livenessProbe:
-        tcpSocket: {port: 8787}
-        initialDelaySeconds: 90
-        periodSeconds: 30
-        failureThreshold: 5
-      resources:
-        requests: {cpu: 500m, memory: 512Mi}
-        limits: {cpu: "2", memory: 2Gi}
-      volumeMounts:
-        - {name: hermes-data, mountPath: /home/hermeswebui/.hermes}
-        - {name: playwright-shared, mountPath: /opt/playwright-browsers}
-        - {name: tools-shared, mountPath: /opt/shared-tools}
+  # The hermes-webui sidecar was REMOVED on 2026-09-13. It had no consumer left:
+  # the owner retired cindytech1-hermes.woowtech.io, and the Service that fronted
+  # port 8787 went with it, so nothing could reach the container. It was still
+  # reserving 500m CPU + 512Mi of requests while using 6m / 216Mi.
+  #
+  # Safe to remove because it produced nothing the agent consumes: the
+  # playwright-shared and tools-shared emptyDirs are mounted by BOTH containers,
+  # but they were verified EMPTY on both sides and no init container populates
+  # them - they are vestigial ("volumes from the sidecar era"). They are left in
+  # place because the agent still mounts them; dropping them is a separate,
+  # larger pod-template change with no benefit.
+  #
+  # One more thing the removal FIXES rather than breaks: the sidecar ran a
+  # background loop writing gateway_state.json every 25s with a hardcoded
+  # '"gateway_state":"running"'. That file is not a webui file - the agent's
+  # HERMES_HOME is /opt/data and its own gateway/status.py owns
+  # gateway_state.json as the runtime status file. The two containers mount the
+  # same volume, so the sidecar was continuously clobbering the agent's real
+  # status with a fake "running". With the sidecar gone the agent is the only
+  # writer again, and the file reflects actual gateway state.
+  #
+  # This cost ONE pod restart, which the owner approved. To bring the webui back,
+  # restore this block AND set hermes.service.webuiPort (see values.yaml).
+  extraContainers: []
   config:
     HERMES_DOMAIN: cindytech1-hermes.woowtech.io
     HERMES_BASE_URL: https://cindytech1-hermes.woowtech.io
