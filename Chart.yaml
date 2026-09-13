@@ -6,7 +6,7 @@ description: >-
   live Hermes instance; several releases (one per instance) can share a
   namespace. hermes-mcp-admin is a separate chart, not part of this one.
 type: application
-version: 2.0.1
+version: 2.0.2
 appVersion: "0.17.0"
 kubeVersion: ">=1.27.0-0"
 keywords:
