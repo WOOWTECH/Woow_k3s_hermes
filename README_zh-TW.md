@@ -502,8 +502,50 @@ stage 收據會明列 `installed: false`、`enabled: false`、`paired: false`。
 與原始碼，再依插件本身的人工安裝步驟處理。禁止整包覆寫
 `$HERMES_HOME/plugins`；保留 `plugin-data`、既有插件來源、憑證、啟用清單與配對
 狀態。本 chart 不會自動啟用或配對任何插件。Paseo 固定為插件
-`0.1.5-rc.3`、runtime `0.11.2-r3-523d451cc096`；Hermes `0.17.4` 不相容，不能
-拿來替換。詳見 [0.22.5 遷移指南](docs/migration/2026-11-26-hermes-0.22.5.md)。
+`0.1.5-rc.3`、runtime `0.11.2-r3-523d451cc096`；Paseo `0.17.4` 不相容，不能
+拿來替換 runtime。詳見 [0.22.5 遷移指南](docs/migration/2026-11-26-hermes-0.22.5.md)。
+
+#### 選用 Agent Connect 主機相容層
+
+原版 Hermes 0.22.5 沒有 Paseo rc.3 所需、帶認證的
+`/api/hermes-paseo-host` adapter。只有確認映像保留 upstream 0.22.5 固定路徑後才開啟：
+
+```yaml
+hermes:
+  image:
+    repository: docker.io/nousresearch/hermes-agent
+    tag: "v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d"
+    pullPolicy: IfNotPresent
+  paseoHostAdapter:
+    enabled: true
+    publicUrl: https://hermes.example.com
+```
+
+chart 會產生 immutable、以內容命名的 ConfigMap，內含 rc.3 完全相同的
+`host/hermes`、`dashboard_control.py`、`profile_lifecycle.py` 與
+`resource_limits.py`。四檔投影模式皆為 `0555`；adapter 目錄及
+`/opt/hermes/.venv/bin/hermes` subPath 均唯讀。wrapper 使用
+`/opt/hermes/.venv/bin/python`、`/command/s6-svstat`、
+`/run/service/dashboard`，拒絕以 root 啟動 Dashboard，並沿用 Hermes 原生
+`_require_token` 認證閘。`publicUrl` 必須是瀏覽器實際使用的 origin，並注入為
+`HERMES_DASHBOARD_PUBLIC_URL`。
+
+預設關閉，不產生 adapter 物件或 mount。開啟也不會安裝、更新、啟用或配對插件。
+映像缺少固定路徑時，pod mount／啟動會明確失敗，不會靜默宣稱支援。
+
+profile 必須由服務身份擁有。此 chart 預設由 s6 以 `HERMES_UID=1000` 執行
+Dashboard；執行任何 CLI/profile 操作前，先確認有效 UID 與 `/opt/data` owner 相同，
+禁止用 root 安裝插件。全新安裝建議登入 Dashboard 後使用 **Plugins → Install from
+Git**，確認掃描結果後再明確啟用。既有、由 Hermes 擁有的 Git checkout 使用卡片的
+**Git pull** 並重載 Dashboard；再次執行一般 install 不等於更新既有來源。若 Hermes
+回報 checkout 沒有 ownership，先停止 Paseo、備份 profile，再依插件文件使用明確且
+經審查的 force-reinstall；不可把 stage 目錄直接覆蓋到執行中的插件目錄。配對與憑證
+仍由使用者另外操作。
+
+`cindytech-cindytech1.yaml` 為重現既有客戶 pod，刻意固定舊私有
+`hermes-agent-custom:aorus-20260727`，因此不會繼承新的公開預設；在 operator 明確審查
+並套用上方 image override 前，不可啟用 adapter。其他 committed instance 檔沒有覆寫
+agent image，會繼承新預設，但 adapter 仍維持關閉，除非另外選用。
 
 ### 黃金配置（`config/golden-config.yaml`）
 

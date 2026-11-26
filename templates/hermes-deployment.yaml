@@ -1,5 +1,6 @@
 {{- $instance := include "hermes.instance" . }}
 {{- $h := .Values.hermes }}
+{{- include "hermes.assertPaseoHostAdapter" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,6 +47,10 @@ spec:
         - {containerPort: 9119, name: dashboard, protocol: TCP}
         env:
           {{- include "hermes.substYaml" (list $ $h.env) | nindent 8 }}
+        {{- if $h.paseoHostAdapter.enabled }}
+        - name: HERMES_DASHBOARD_PUBLIC_URL
+          value: {{ include "hermes.subst" (list $ $h.paseoHostAdapter.publicUrl) | quote }}
+        {{- end }}
         {{- if $h.dashboardAuth.enabled }}
         - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
           value: {{ include "hermes.subst" (list $ $h.dashboardAuth.username) | quote }}
@@ -81,6 +86,15 @@ spec:
         {{- end }}
         volumeMounts:
         - {mountPath: /opt/data, name: hermes-data}
+        {{- if $h.paseoHostAdapter.enabled }}
+        - name: hermes-paseo-host
+          mountPath: /opt/hermes-paseo-dashboard-control
+          readOnly: true
+        - name: hermes-paseo-host
+          mountPath: /opt/hermes/.venv/bin/hermes
+          subPath: hermes
+          readOnly: true
+        {{- end }}
         {{- if $h.sharedVolumes.enabled }}
         - {mountPath: /shared-pw, name: playwright-shared}
         - {mountPath: /shared-tools, name: tools-shared}
@@ -92,6 +106,17 @@ spec:
       - name: hermes-data
         persistentVolumeClaim:
           claimName: {{ include "hermes.subst" (list $ $h.persistence.claimName) }}
+      {{- if $h.paseoHostAdapter.enabled }}
+      - name: hermes-paseo-host
+        configMap:
+          name: {{ include "hermes.paseoHostAdapterName" . }}
+          defaultMode: 0555
+          items:
+          - {key: hermes, path: hermes}
+          - {key: dashboard_control.py, path: dashboard_control.py}
+          - {key: profile_lifecycle.py, path: profile_lifecycle.py}
+          - {key: resource_limits.py, path: resource_limits.py}
+      {{- end }}
       {{- if $h.sharedVolumes.enabled }}
       - name: playwright-shared
         emptyDir: {}

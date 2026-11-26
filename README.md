@@ -543,8 +543,57 @@ install instructions. Never replace `$HERMES_HOME/plugins` wholesale; preserve
 `plugin-data`, existing source folders, credentials, enabled-plugin settings,
 and pairing state. Neither plugin is auto-enabled or paired by this chart.
 Paseo is locked to plugin `0.1.5-rc.3` with runtime
-`0.11.2-r3-523d451cc096`; Hermes `0.17.4` is not a compatible substitute.
+`0.11.2-r3-523d451cc096`; Paseo `0.17.4` is not a compatible runtime substitute.
 See the [0.22.5 migration guide](docs/migration/2026-11-26-hermes-0.22.5.md).
+
+#### Opt-in Agent Connect host compatibility
+
+Vanilla Hermes 0.22.5 does not include the authenticated
+`/api/hermes-paseo-host` adapter required by Paseo rc.3. Enable the reviewed
+four-file adapter only on an image that retains the upstream 0.22.5 paths:
+
+```yaml
+hermes:
+  image:
+    repository: docker.io/nousresearch/hermes-agent
+    tag: "v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d"
+    pullPolicy: IfNotPresent
+  paseoHostAdapter:
+    enabled: true
+    publicUrl: https://hermes.example.com
+```
+
+This renders an immutable, content-addressed ConfigMap containing the exact
+rc.3 `host/hermes`, `dashboard_control.py`, `profile_lifecycle.py`, and
+`resource_limits.py`. Kubernetes projects all four as mode `0555`; the adapter
+directory and `/opt/hermes/.venv/bin/hermes` subPath are read-only. The wrapper
+uses `/opt/hermes/.venv/bin/python`, `/command/s6-svstat`, and
+`/run/service/dashboard`, rejects starting Dashboard as root, and registers the
+route through Hermes's existing `_require_token` gate. `publicUrl` is the exact
+browser-visible origin and becomes `HERMES_DASHBOARD_PUBLIC_URL`.
+
+The default remains disabled and renders no adapter object or mount. Enabling
+it does not install, update, enable, or pair the plugin. A missing/incompatible
+image path fails the pod mount/start rather than silently claiming support.
+
+The service identity owns the profile. With these defaults s6 drops Dashboard
+to `HERMES_UID=1000`; before any CLI/profile operation verify the effective UID
+matches `/opt/data` ownership. Do not run plugin installation as root. For a new
+installation, prefer Dashboard **Plugins → Install from Git** while logged in,
+then explicitly enable after reviewing the scanner result. For an existing
+owned Git checkout, use its **Git pull** update flow and reload Dashboard.
+Running a normal install again is not an update of an existing source tree. If
+Hermes reports that the checkout is not owned, stop Paseo, back up the profile,
+and use the plugin's explicit reviewed force-reinstall flow; never overlay the
+staged archive onto an active plugin directory. Pairing and credentials remain
+manual after installation.
+
+The committed `cindytech-cindytech1.yaml` deliberately pins the older private
+`hermes-agent-custom:aorus-20260727` image to reproduce that existing customer
+pod. It therefore does **not** inherit the new public default and must not enable
+the adapter until an operator explicitly reviews and applies the image override
+above. The other committed instance files do not override the agent image and
+inherit the new default, but the adapter still remains disabled unless selected.
 
 ### Golden Configuration (`config/golden-config.yaml`)
 

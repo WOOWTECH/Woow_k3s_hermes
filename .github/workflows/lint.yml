@@ -62,6 +62,10 @@ jobs:
             --set "$SECRETS" --set-string "$PH"                                 > /tmp/r/test-install.yaml
           # rbac.enabled is opt-in everywhere; prove it still renders cleanly.
           helm template hermes . -n hermes --set instance=hermes --set rbac.enabled=true --set-string "$PH" > /tmp/r/rbac-on.yaml
+          # Agent Connect host compatibility is opt-in; exercise its immutable
+          # ConfigMap, public-origin env, and read-only CLI/module mounts.
+          helm template hermes . -n hermes --set instance=hermes \
+            --set hermes.paseoHostAdapter.enabled=true --set-string "$PH" > /tmp/r/paseo-host-adapter.yaml
           # hermes.service.webuiPort is null for every instance (both hostnames it
           # existed for are retired), so nothing else here exercises it. Render it
           # explicitly so the Service template cannot rot unnoticed, and assert it
@@ -287,4 +291,5 @@ jobs:
         run: |
           bash tests/runtime-release-contract.sh
           python3 tests/plugin-release-contract.py
+          python3 tests/paseo-host-adapter-contract.py
           python3 scripts/stage-optional-plugins.py --list

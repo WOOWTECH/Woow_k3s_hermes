@@ -12,7 +12,7 @@
       "commit": "7b9c88d032672f688c88df222e384ce3bc1af2f2",
       "archive_sha256": "dc1a49760a1e98e19b6626fae22200ea65e021fc6a47bbf14edc1131036eb1bf",
       "runtime": "0.11.2-r3-523d451cc096",
-      "notes": "Hermes 0.22.5 compatible; do not substitute Hermes 0.17.4."
+      "notes": "Hermes 0.22.5 compatible; Paseo 0.17.4 is not a compatible runtime substitute."
     },
     "hermes-omnigent": {
       "repository": "WOOWTECH/hermes-omnigent-plugin",

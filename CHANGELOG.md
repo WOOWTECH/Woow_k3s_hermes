@@ -13,14 +13,16 @@ All notable changes to the WoowTech Hermes Agent deployment package.
 ### Added
 - Exact optional source locks for hermes-paseo `v0.1.5-rc.3` and
   hermes-omnigent `v0.1.0-rc.21`, plus a SHA-256-verifying staging command.
+- Opt-in, immutable ConfigMap packaging of the four reviewed Paseo rc.3 host
+  adapter files, mounted read-only at the upstream Hermes 0.22.5 s6/CLI paths.
 - Upgrade guide covering values/PVC/Secret preservation, plugin non-mutation,
   rollback, and the separate chart/image publication recipe.
 
 ### Safety
 - Optional plugins remain uninstalled, disabled, and unpaired by default.
 - The standalone public chart does not use the private PaaS image.
-- Hermes `0.17.4` is explicitly rejected as a substitute for the Paseo runtime
-  validated with Hermes `0.22.5`.
+- Paseo `0.17.4` is explicitly rejected as a substitute for the locked Paseo
+  `0.11.2-r3-523d451cc096` runtime validated with Hermes `0.22.5`.
 
 ## [0.17.0] - 2026-07-30 — BREAKING: single-container architecture
 
