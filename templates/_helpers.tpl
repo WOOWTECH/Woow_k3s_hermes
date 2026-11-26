@@ -16,7 +16,11 @@ instance in namespace "hermes" is literally "hermes").
 {{/* Content-addressed, immutable ConfigMap for the reviewed rc.3 adapter. */}}
 {{- define "hermes.paseoHostAdapterName" -}}
 {{- $files := printf "%s\n%s\n%s\n%s" (.Files.Get "files/paseo-host/hermes") (.Files.Get "files/paseo-host/dashboard_control.py") (.Files.Get "files/paseo-host/profile_lifecycle.py") (.Files.Get "files/paseo-host/resource_limits.py") -}}
-{{- printf "%s-paseo-host-%s" (include "hermes.instance" .) (sha256sum $files | trunc 12) | trunc 63 | trimSuffix "-" -}}
+{{- /* ConfigMap names allow 253 characters. A valid Deployment instance is at
+      most 63, so retain the complete instance and content-hash suffix. Truncating
+      the whole name to 63 could discard the hash and make immutable updates or
+      distinct long instance names collide. */ -}}
+{{- printf "%s-paseo-host-%s" (include "hermes.instance" .) (sha256sum $files | trunc 12) -}}
 {{- end -}}
 
 {{- define "hermes.assertPaseoHostAdapter" -}}

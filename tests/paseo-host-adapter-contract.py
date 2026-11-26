@@ -22,10 +22,10 @@ PH = (
 )
 
 
-def render(enabled: bool):
+def render(enabled: bool, instance: str = "adapter-test"):
     command = [
         "helm", "template", "adapter-test", str(ROOT), "-n", "adapter-test",
-        "--set", "instance=adapter-test",
+        "--set", f"instance={instance}",
         "--set-string", PH,
     ]
     if enabled:
@@ -89,6 +89,29 @@ class PaseoHostAdapterContract(unittest.TestCase):
         rendered = yaml.safe_dump_all(documents)
         self.assertNotIn("plugins install", rendered)
         self.assertNotIn("plugins enable", rendered)
+
+    def test_long_instance_names_retain_unique_instance_and_hash_suffix(self):
+        shared = "a" * 61
+        instances = [shared + "01", shared + "02"]
+        names = []
+        for instance in instances:
+            documents = render(True, instance)
+            configmap = next(
+                doc for doc in documents
+                if doc["kind"] == "ConfigMap"
+                and doc["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "paseo-host-adapter"
+            )
+            name = configmap["metadata"]["name"]
+            self.assertTrue(name.startswith(instance + "-paseo-host-"))
+            suffix = name.rsplit("-", 1)[1]
+            self.assertRegex(suffix, r"^[0-9a-f]{12}$")
+            self.assertLessEqual(len(name), 253)
+            deployment = next(doc for doc in documents if doc["kind"] == "Deployment" and doc["metadata"]["name"] == instance)
+            volume = next(item for item in deployment["spec"]["template"]["spec"]["volumes"] if item["name"] == "hermes-paseo-host")
+            self.assertEqual(volume["configMap"]["name"], name)
+            names.append(name)
+        self.assertNotEqual(names[0], names[1])
+        self.assertEqual(names[0].rsplit("-", 1)[1], names[1].rsplit("-", 1)[1])
 
     def test_enabled_requires_a_clean_public_origin(self):
         command = [
