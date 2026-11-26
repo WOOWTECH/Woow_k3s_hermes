@@ -94,12 +94,21 @@ hermes:
   # would roll the Deployment. Never add a new one to a live instance.
   podAnnotations: {}
   image:
-    repository: nousresearch/hermes-agent
-    tag: latest
-    # The original manifests used :latest with no explicit pullPolicy, i.e.
-    # the implicit `Always`. Kept explicit here for clarity; behavior is
-    # identical.
-    pullPolicy: Always
+    repository: docker.io/nousresearch/hermes-agent
+    # Public standalone runtime, independently pinned from the private PaaS
+    # derivative. Keep tag + digest together: templates concatenate
+    # repository:tag, producing a valid OCI reference.
+    tag: "v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d"
+    pullPolicy: IfNotPresent
+  # Optional Agent Connect host adapter for hermes-paseo v0.1.5-rc.3.
+  # Disabled by default. When enabled, the chart mounts the four reviewed host
+  # files read-only and replaces only the container's Hermes CLI path. It does
+  # not install/enable/update the plugin, pair a remote, or write credentials.
+  paseoHostAdapter:
+    enabled: false
+    # Required when enabled. Exact browser-visible Dashboard origin, with no
+    # path/query/credentials. Supplied to the adapter's fail-closed Origin gate.
+    publicUrl: https://__DOMAIN__
   replicaCount: 1
   # SQLite / single-writer PVC semantics require Recreate, not RollingUpdate.
   strategy: Recreate

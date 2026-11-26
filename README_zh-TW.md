@@ -181,7 +181,7 @@ sequenceDiagram
 
 ```mermaid
 graph BT
-    BASE["nousresearch/hermes-agent:latest<br/>（s6-overlay, Python 3.13, Node 20）"]
+    BASE["nousresearch/hermes-agent:v0.22.5@sha256<br/>（s6-overlay，固定公開 runtime）"]
     L1["第 1 層：apt 套件<br/>jq, fd, rsync, mosh, git-lfs, nmap, imagemagick"]
     L2["第 2 層：二進位下載<br/>yq v4.44.6, cloudflared, gh CLI v2.73"]
     L3["第 3 層：Google Cloud SDK<br/>gcloud, gsutil, bq"]
@@ -220,7 +220,7 @@ graph LR
 
 | 元件 | 映像 | 端口 | 用途 | Chart 模板 |
 |------|------|------|------|-----------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `templates/hermes-deployment.yaml` |
+| **Hermes Agent** | `nousresearch/hermes-agent:v0.22.5@sha256:9c556…238d` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `templates/hermes-deployment.yaml` |
 | **瀏覽器終端** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | 瀏覽器 TUI — kubectl exec 進入 hermes-agent shell | `templates/terminal.yaml` |
 | **PostgreSQL** | `postgres:15` | 5432 | 資料持久化（對話、記憶、設定） | `templates/postgresql-deployment.yaml` |
 | **Redis** | `redis:7-alpine` | 6379 | 快取、Session 狀態 | `templates/redis-deployment.yaml` |
@@ -473,6 +473,80 @@ helm template hermes . -n hermes -f my-values.yaml \
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # 如已安裝 helm-diff plugin
 ```
 
+### Hermes 0.22.5 升級與選用插件
+
+Chart 2.1.0 以 digest 固定公開 upstream
+`nousresearch/hermes-agent:v0.22.5`；它不會改用或假裝重現 PaaS 私有衍生映像。
+既有 release 升級前先匯出並檢查 values，再明確傳回，保留 PVC 名稱、Secret
+引用、網域、sidecar 與每個 instance 的設定：
+
+```bash
+helm get values hermes -n hermes -o yaml > hermes-existing-values.yaml
+helm diff upgrade hermes . -n hermes -f hermes-existing-values.yaml \
+  --set-string placeholders.DOMAIN="$DOMAIN" \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+`plugins/lock.json` 記錄選用插件的精確來源。以下只 stage 原始碼，不讀取 Hermes
+profile：
+
+```bash
+python3 scripts/stage-optional-plugins.py --list
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-paseo --output /tmp/hermes-paseo-0.1.5-rc.3
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-omnigent --output /tmp/hermes-omnigent-0.1.0-rc.21
+```
+
+stage 收據會明列 `installed: false`、`enabled: false`、`paired: false`。先審查收據
+與原始碼，再依插件本身的人工安裝步驟處理。禁止整包覆寫
+`$HERMES_HOME/plugins`；保留 `plugin-data`、既有插件來源、憑證、啟用清單與配對
+狀態。本 chart 不會自動啟用或配對任何插件。Paseo 固定為插件
+`0.1.5-rc.3`、runtime `0.11.2-r3-523d451cc096`；Paseo `0.17.4` 不相容，不能
+拿來替換 runtime。詳見 [0.22.5 遷移指南](docs/migration/2026-11-26-hermes-0.22.5.md)。
+
+#### 選用 Agent Connect 主機相容層
+
+原版 Hermes 0.22.5 沒有 Paseo rc.3 所需、帶認證的
+`/api/hermes-paseo-host` adapter。只有確認映像保留 upstream 0.22.5 固定路徑後才開啟：
+
+```yaml
+hermes:
+  image:
+    repository: docker.io/nousresearch/hermes-agent
+    tag: "v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d"
+    pullPolicy: IfNotPresent
+  paseoHostAdapter:
+    enabled: true
+    publicUrl: https://hermes.example.com
+```
+
+chart 會產生 immutable、以內容命名的 ConfigMap，內含 rc.3 完全相同的
+`host/hermes`、`dashboard_control.py`、`profile_lifecycle.py` 與
+`resource_limits.py`。四檔投影模式皆為 `0555`；adapter 目錄及
+`/opt/hermes/.venv/bin/hermes` subPath 均唯讀。wrapper 使用
+`/opt/hermes/.venv/bin/python`、`/command/s6-svstat`、
+`/run/service/dashboard`，拒絕以 root 啟動 Dashboard，並沿用 Hermes 原生
+`_require_token` 認證閘。`publicUrl` 必須是瀏覽器實際使用的 origin，並注入為
+`HERMES_DASHBOARD_PUBLIC_URL`。
+
+預設關閉，不產生 adapter 物件或 mount。開啟也不會安裝、更新、啟用或配對插件。
+映像缺少固定路徑時，pod mount／啟動會明確失敗，不會靜默宣稱支援。
+
+profile 必須由服務身份擁有。此 chart 預設由 s6 以 `HERMES_UID=1000` 執行
+Dashboard；執行任何 CLI/profile 操作前，先確認有效 UID 與 `/opt/data` owner 相同，
+禁止用 root 安裝插件。全新安裝建議登入 Dashboard 後使用 **Plugins → Install from
+Git**，確認掃描結果後再明確啟用。既有、由 Hermes 擁有的 Git checkout 使用卡片的
+**Git pull** 並重載 Dashboard；再次執行一般 install 不等於更新既有來源。若 Hermes
+回報 checkout 沒有 ownership，先停止 Paseo、備份 profile，再依插件文件使用明確且
+經審查的 force-reinstall；不可把 stage 目錄直接覆蓋到執行中的插件目錄。配對與憑證
+仍由使用者另外操作。
+
+`cindytech-cindytech1.yaml` 為重現既有客戶 pod，刻意固定舊私有
+`hermes-agent-custom:aorus-20260727`，因此不會繼承新的公開預設；在 operator 明確審查
+並套用上方 image override 前，不可啟用 adapter。其他 committed instance 檔沒有覆寫
+agent image，會繼承新預設，但 adapter 仍維持關閉，除非另外選用。
+
 ### 黃金配置（`config/golden-config.yaml`）
 
 黃金配置是 Hermes Agent 的核心配置檔（630+ 行），主要區段：
@@ -566,13 +640,12 @@ kubectl -n hermes delete pvc hermes-data hermes-postgresql-pvc hermes-redis-pvc
 自訂 Dockerfile（`docker/Dockerfile.hermes-agent`）在基礎映像上增加 7 層：
 
 ```bash
-# 建置自訂映像
-cd docker
-docker build -t hermes-agent-custom:latest -f Dockerfile.hermes-agent .
+# 使用與 chart 相同的固定公開 base 建置自訂映像
+./docker/build-image.sh
 
 # 推送到 Registry
-docker tag hermes-agent-custom:latest <registry>/hermes-agent-custom:latest
-docker push <registry>/hermes-agent-custom:latest
+docker tag docker.io/woowtech/hermes-agent-custom:0.22.5-woow1 <registry>/hermes-agent-custom:0.22.5-woow1
+docker push <registry>/hermes-agent-custom:0.22.5-woow1
 ```
 
 ### 相較基礎映像新增的內容

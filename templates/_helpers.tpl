@@ -13,6 +13,32 @@ instance in namespace "hermes" is literally "hermes").
 {{- required "instance is required (the live object name prefix, e.g. \"hermes\" or \"cindytech1\")" .Values.instance -}}
 {{- end -}}
 
+{{/* Content-addressed, immutable ConfigMap for the reviewed rc.3 adapter. */}}
+{{- define "hermes.paseoHostAdapterName" -}}
+{{- $files := printf "%s\n%s\n%s\n%s" (.Files.Get "files/paseo-host/hermes") (.Files.Get "files/paseo-host/dashboard_control.py") (.Files.Get "files/paseo-host/profile_lifecycle.py") (.Files.Get "files/paseo-host/resource_limits.py") -}}
+{{- /* ConfigMap names allow 253 characters. A valid Deployment instance is at
+      most 63, so retain the complete instance and content-hash suffix. Truncating
+      the whole name to 63 could discard the hash and make immutable updates or
+      distinct long instance names collide. */ -}}
+{{- printf "%s-paseo-host-%s" (include "hermes.instance" .) (sha256sum $files | trunc 12) -}}
+{{- end -}}
+
+{{- define "hermes.assertPaseoHostAdapter" -}}
+{{- $adapter := .Values.hermes.paseoHostAdapter | default dict -}}
+{{- if and (hasKey $adapter "enabled") (not (kindIs "bool" $adapter.enabled)) -}}
+{{- fail "hermes.paseoHostAdapter.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $adapter.enabled -}}
+{{- if not (kindIs "string" $adapter.publicUrl) -}}
+{{- fail "hermes.paseoHostAdapter.publicUrl must be a string" -}}
+{{- end -}}
+{{- $url := include "hermes.subst" (list $ $adapter.publicUrl) -}}
+{{- if not (regexMatch "^https?://[^/?#[:space:]@]+/?$" $url) -}}
+{{- fail "hermes.paseoHostAdapter.publicUrl must be an http(s) origin without credentials, path, query or fragment" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- /*
 Object placement. `namespace.name` is EMPTY by default so placement follows
 `-n`/`--namespace`. Setting it (here or in a values file) makes it win over

@@ -25,7 +25,7 @@ APIs, security, resilience, cross-service integration, and browser UX.
 
 | Component | Image | Ports | Storage |
 |-----------|-------|-------|---------|
-| hermes-agent | nousresearch/hermes-agent:latest | 8642 (gateway), 9119 (dashboard) | hermes-home-pvc 10Gi |
+| hermes-agent | nousresearch/hermes-agent:v0.22.5@sha256:9c556…238d | 8642 (gateway), 9119 (dashboard) | hermes-home-pvc 10Gi |
 | hermes-webui | ghcr.io/nesquena/hermes-webui:latest | 8787 | emptyDir |
 | PostgreSQL | postgres:15 | 5432 | hermes-postgresql-pvc 10Gi |
 | Redis | redis:7-alpine | 6379 (appendonly, 256mb, allkeys-lru) | hermes-redis-pvc 5Gi |

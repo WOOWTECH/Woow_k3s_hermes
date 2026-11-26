@@ -1,0 +1,26 @@
+{{- $h := .Values.hermes -}}
+{{- if $h.paseoHostAdapter.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hermes.paseoHostAdapterName" . }}
+  namespace: {{ include "hermes.ns" . }}
+  labels:
+    app: {{ include "hermes.instance" . }}
+    app.kubernetes.io/component: paseo-host-adapter
+  annotations:
+    woowtech.io/source-repository: WOOWTECH/hermes-paseo-plugin
+    woowtech.io/source-tag: v0.1.5-rc.3
+    woowtech.io/source-commit: 7b9c88d032672f688c88df222e384ce3bc1af2f2
+    woowtech.io/dashboard-control-sha256: 542cb4cd394b6c1b068723dd68cb16cdb98a77f4e7147aab3632ae8f6968d01e
+immutable: true
+data:
+  hermes: |
+{{ .Files.Get "files/paseo-host/hermes" | indent 4 }}
+  dashboard_control.py: |
+{{ .Files.Get "files/paseo-host/dashboard_control.py" | indent 4 }}
+  profile_lifecycle.py: |
+{{ .Files.Get "files/paseo-host/profile_lifecycle.py" | indent 4 }}
+  resource_limits.py: |
+{{ .Files.Get "files/paseo-host/resource_limits.py" | indent 4 }}
+{{- end }}
