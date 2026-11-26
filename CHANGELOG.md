@@ -2,6 +2,26 @@
 
 All notable changes to the WoowTech Hermes Agent deployment package.
 
+## [2.1.0] - 2026-11-26 — Hermes 0.22.5 reproducible standalone runtime
+
+### Changed
+- Default public runtime is now Hermes Agent `v0.22.5` pinned by OCI digest;
+  the custom-image build consumes the identical immutable base.
+- Chart `appVersion` now reflects the selected runtime instead of changing
+  metadata without changing the image.
+
+### Added
+- Exact optional source locks for hermes-paseo `v0.1.5-rc.3` and
+  hermes-omnigent `v0.1.0-rc.21`, plus a SHA-256-verifying staging command.
+- Upgrade guide covering values/PVC/Secret preservation, plugin non-mutation,
+  rollback, and the separate chart/image publication recipe.
+
+### Safety
+- Optional plugins remain uninstalled, disabled, and unpaired by default.
+- The standalone public chart does not use the private PaaS image.
+- Hermes `0.17.4` is explicitly rejected as a substitute for the Paseo runtime
+  validated with Hermes `0.22.5`.
+
 ## [0.17.0] - 2026-07-30 — BREAKING: single-container architecture
 
 ### Removed

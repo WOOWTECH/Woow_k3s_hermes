@@ -184,7 +184,7 @@ sequenceDiagram
 
 ```mermaid
 graph BT
-    BASE["nousresearch/hermes-agent:latest<br/>(s6-overlay, Python 3.13, Node 20)"]
+    BASE["nousresearch/hermes-agent:v0.22.5@sha256<br/>(s6-overlay, pinned public runtime)"]
     L1["Layer 1: apt packages<br/>jq, fd, rsync, mosh, git-lfs, nmap, imagemagick"]
     L2["Layer 2: Binary downloads<br/>yq v4.44.6, cloudflared, gh CLI v2.73"]
     L3["Layer 3: Google Cloud SDK<br/>gcloud, gsutil, bq"]
@@ -223,7 +223,7 @@ graph LR
 
 | Component | Image | Port | Purpose | Chart Template |
 |-----------|-------|------|---------|----------------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642 (Gateway), 9119 (Dashboard + /chat TUI) | AI engine, tool execution, Gateway API, Dashboard with xterm.js chat TUI | `templates/hermes-deployment.yaml` |
+| **Hermes Agent** | `nousresearch/hermes-agent:v0.22.5@sha256:9c556…238d` | 8642 (Gateway), 9119 (Dashboard + /chat TUI) | AI engine, tool execution, Gateway API, Dashboard with xterm.js chat TUI | `templates/hermes-deployment.yaml` |
 | **Browser Terminal** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | Browser-based TUI — kubectl exec into hermes-agent shell | `templates/terminal.yaml` |
 | **PostgreSQL** | `postgres:15` | 5432 | Data persistence (conversations, memory, settings) | `templates/postgresql-deployment.yaml` |
 | **Redis** | `redis:7-alpine` | 6379 | Cache, session state | `templates/redis-deployment.yaml` |
@@ -510,6 +510,42 @@ helm template hermes . -n hermes -f my-values.yaml \
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # if helm-diff plugin installed
 ```
 
+### Hermes 0.22.5 upgrade and optional plugins
+
+Chart 2.1.0 selects the public upstream runtime
+`nousresearch/hermes-agent:v0.22.5` by immutable digest. It does not select or
+reproduce the private PaaS derivative. Before upgrading an existing release,
+export and review its values, then pass that file back explicitly so PVC names,
+credentials references, domains, sidecars, and instance-specific settings stay
+unchanged:
+
+```bash
+helm get values hermes -n hermes -o yaml > hermes-existing-values.yaml
+helm diff upgrade hermes . -n hermes -f hermes-existing-values.yaml \
+  --set-string placeholders.DOMAIN="$DOMAIN" \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+Exact optional plugin sources are recorded in `plugins/lock.json`. Staging is
+explicit and does not access a Hermes profile:
+
+```bash
+python3 scripts/stage-optional-plugins.py --list
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-paseo --output /tmp/hermes-paseo-0.1.5-rc.3
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-omnigent --output /tmp/hermes-omnigent-0.1.0-rc.21
+```
+
+The staged receipt says `installed: false`, `enabled: false`, and
+`paired: false`. Review it and the source, then follow the plugin's own manual
+install instructions. Never replace `$HERMES_HOME/plugins` wholesale; preserve
+`plugin-data`, existing source folders, credentials, enabled-plugin settings,
+and pairing state. Neither plugin is auto-enabled or paired by this chart.
+Paseo is locked to plugin `0.1.5-rc.3` with runtime
+`0.11.2-r3-523d451cc096`; Hermes `0.17.4` is not a compatible substitute.
+See the [0.22.5 migration guide](docs/migration/2026-11-26-hermes-0.22.5.md).
+
 ### Golden Configuration (`config/golden-config.yaml`)
 
 The golden config is the central configuration file for the Hermes Agent (630+ lines). Key sections:
@@ -606,13 +642,12 @@ throwaway test release you want to disappear completely.
 The custom Dockerfile (`docker/Dockerfile.hermes-agent`) extends the base image with 7 layers:
 
 ```bash
-# Build custom image
-cd docker
-docker build -t hermes-agent-custom:latest -f Dockerfile.hermes-agent .
+# Build custom image from the same pinned public base as the chart
+./docker/build-image.sh
 
 # Push to registry
-docker tag hermes-agent-custom:latest <registry>/hermes-agent-custom:latest
-docker push <registry>/hermes-agent-custom:latest
+docker tag docker.io/woowtech/hermes-agent-custom:0.22.5-woow1 <registry>/hermes-agent-custom:0.22.5-woow1
+docker push <registry>/hermes-agent-custom:0.22.5-woow1
 ```
 
 ### What's Added vs Base Image

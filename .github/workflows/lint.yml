@@ -282,3 +282,9 @@ jobs:
         run: |
           shopt -s nullglob
           for f in scripts/*.sh; do bash -n "$f"; done
+
+      - name: Runtime and optional-plugin release contracts
+        run: |
+          bash tests/runtime-release-contract.sh
+          python3 tests/plugin-release-contract.py
+          python3 scripts/stage-optional-plugins.py --list

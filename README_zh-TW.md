@@ -181,7 +181,7 @@ sequenceDiagram
 
 ```mermaid
 graph BT
-    BASE["nousresearch/hermes-agent:latest<br/>（s6-overlay, Python 3.13, Node 20）"]
+    BASE["nousresearch/hermes-agent:v0.22.5@sha256<br/>（s6-overlay，固定公開 runtime）"]
     L1["第 1 層：apt 套件<br/>jq, fd, rsync, mosh, git-lfs, nmap, imagemagick"]
     L2["第 2 層：二進位下載<br/>yq v4.44.6, cloudflared, gh CLI v2.73"]
     L3["第 3 層：Google Cloud SDK<br/>gcloud, gsutil, bq"]
@@ -220,7 +220,7 @@ graph LR
 
 | 元件 | 映像 | 端口 | 用途 | Chart 模板 |
 |------|------|------|------|-----------|
-| **Hermes Agent** | `nousresearch/hermes-agent:latest` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `templates/hermes-deployment.yaml` |
+| **Hermes Agent** | `nousresearch/hermes-agent:v0.22.5@sha256:9c556…238d` | 8642（Gateway）, 9119（Dashboard + /chat TUI） | AI 引擎、工具執行、Gateway API、Dashboard + xterm.js 對話 TUI | `templates/hermes-deployment.yaml` |
 | **瀏覽器終端** | `ubuntu:24.04` + ttyd 1.7.7 | 7681 | 瀏覽器 TUI — kubectl exec 進入 hermes-agent shell | `templates/terminal.yaml` |
 | **PostgreSQL** | `postgres:15` | 5432 | 資料持久化（對話、記憶、設定） | `templates/postgresql-deployment.yaml` |
 | **Redis** | `redis:7-alpine` | 6379 | 快取、Session 狀態 | `templates/redis-deployment.yaml` |
@@ -473,6 +473,38 @@ helm template hermes . -n hermes -f my-values.yaml \
 helm diff upgrade hermes . -n hermes -f my-values.yaml   # 如已安裝 helm-diff plugin
 ```
 
+### Hermes 0.22.5 升級與選用插件
+
+Chart 2.1.0 以 digest 固定公開 upstream
+`nousresearch/hermes-agent:v0.22.5`；它不會改用或假裝重現 PaaS 私有衍生映像。
+既有 release 升級前先匯出並檢查 values，再明確傳回，保留 PVC 名稱、Secret
+引用、網域、sidecar 與每個 instance 的設定：
+
+```bash
+helm get values hermes -n hermes -o yaml > hermes-existing-values.yaml
+helm diff upgrade hermes . -n hermes -f hermes-existing-values.yaml \
+  --set-string placeholders.DOMAIN="$DOMAIN" \
+  --set-string placeholders.DASHBOARD_PASSWORD="$DASHPASS"
+```
+
+`plugins/lock.json` 記錄選用插件的精確來源。以下只 stage 原始碼，不讀取 Hermes
+profile：
+
+```bash
+python3 scripts/stage-optional-plugins.py --list
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-paseo --output /tmp/hermes-paseo-0.1.5-rc.3
+python3 scripts/stage-optional-plugins.py \
+  --plugin hermes-omnigent --output /tmp/hermes-omnigent-0.1.0-rc.21
+```
+
+stage 收據會明列 `installed: false`、`enabled: false`、`paired: false`。先審查收據
+與原始碼，再依插件本身的人工安裝步驟處理。禁止整包覆寫
+`$HERMES_HOME/plugins`；保留 `plugin-data`、既有插件來源、憑證、啟用清單與配對
+狀態。本 chart 不會自動啟用或配對任何插件。Paseo 固定為插件
+`0.1.5-rc.3`、runtime `0.11.2-r3-523d451cc096`；Hermes `0.17.4` 不相容，不能
+拿來替換。詳見 [0.22.5 遷移指南](docs/migration/2026-11-26-hermes-0.22.5.md)。
+
 ### 黃金配置（`config/golden-config.yaml`）
 
 黃金配置是 Hermes Agent 的核心配置檔（630+ 行），主要區段：
@@ -566,13 +598,12 @@ kubectl -n hermes delete pvc hermes-data hermes-postgresql-pvc hermes-redis-pvc
 自訂 Dockerfile（`docker/Dockerfile.hermes-agent`）在基礎映像上增加 7 層：
 
 ```bash
-# 建置自訂映像
-cd docker
-docker build -t hermes-agent-custom:latest -f Dockerfile.hermes-agent .
+# 使用與 chart 相同的固定公開 base 建置自訂映像
+./docker/build-image.sh
 
 # 推送到 Registry
-docker tag hermes-agent-custom:latest <registry>/hermes-agent-custom:latest
-docker push <registry>/hermes-agent-custom:latest
+docker tag docker.io/woowtech/hermes-agent-custom:0.22.5-woow1 <registry>/hermes-agent-custom:0.22.5-woow1
+docker push <registry>/hermes-agent-custom:0.22.5-woow1
 ```
 
 ### 相較基礎映像新增的內容
